@@ -8,7 +8,7 @@ import glob
 st.set_page_config(page_title="KKBOX 會員數據自動化分析系統", layout="wide", page_icon="📊")
 
 # ==========================================
-# 🔑 1. 固定 Google Drive 資料夾 ID (請在下方貼上你的 ID)
+# 🔑 1. 鎖定固定的 Google Drive 資料夾 ID
 # ==========================================
 FIXED_DRIVE_FOLDER_ID = "1YjLkuX_BuEeWvsWTuH_kT7Wmei7edFO_"
 
@@ -39,7 +39,7 @@ if 'tag_map' not in st.session_state:
     st.session_state['tag_map'] = OFFICIAL_TAG_MAP.copy()
 
 st.title("📊 KKBOX 會員數據自動化分析系統 (週視角)")
-st.caption("🚀 已連動雲端資料庫，自動同步最新 RAW Data！")
+st.caption("🚀 已連動固定雲端資料庫，自動讀取最新週別 Raw Data！")
 st.markdown("---")
 
 # ==========================================
@@ -53,7 +53,8 @@ def load_data_from_drive(folder_id):
     
     try:
         url = f"https://drive.google.com/drive/folders/{folder_id}"
-        gdown.download_folder(url, output=download_dir, quiet=True, remaining_ok=True)
+        # 修正相容語法
+        gdown.download_folder(url, output=download_dir, quiet=True, use_cookies=False)
     except Exception as e:
         st.error(f"❌ Google Drive 讀取失敗，請確認資料夾權限已開啟『知道連結的人皆可檢視』。錯誤訊息：{e}")
         return pd.DataFrame()
@@ -101,13 +102,13 @@ def load_data_from_drive(folder_id):
 
     if parsed_rows:
         df_all = pd.DataFrame(parsed_rows)
-        # 多檔去重：若有重疊日期與方案，取最大值
+        # 多檔去重：重疊日期與方案取最大值
         df_clean = df_all.groupby(['Date', 'Package_Name', 'Metric'], as_index=False)['Value'].max()
         df_clean['Date_dt'] = pd.to_datetime(df_clean['Date'])
         return df_clean.sort_values('Date_dt')
     return pd.DataFrame()
 
-# 左側按鈕：同步最新 Drive 資料
+# 側邊欄：手動重新整理按鈕
 if st.sidebar.button("🔄 手動同步最新 Drive 資料"):
     st.cache_data.clear()
     st.rerun()
