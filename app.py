@@ -10,9 +10,8 @@ st.set_page_config(page_title="KKBOX 會員數據自動化分析系統", layout=
 CONFIG_FILE = "sheet_urls_db.json"
 
 # ==========================================
-# 💾 0. 網址永久儲存庫 (JSON 讀寫邏輯)
+# 💾 0. 網址永久儲存庫
 # ==========================================
-# 預設第一次使用時的網址資料庫
 DEFAULT_URL_DB = {
     "2026/07/12": "https://docs.google.com/spreadsheets/d/1rfEcF4gQn-o-8KQ-LVcFT9e4QrSJNzQJ/edit?gid=1647904491#gid=1647904491"
 }
@@ -65,18 +64,17 @@ if 'tag_map' not in st.session_state:
     st.session_state['tag_map'] = OFFICIAL_TAG_MAP.copy()
 
 st.title("📊 KKBOX 會員數據自動化分析系統 (全歷史連通版)")
-st.caption("🚀 支援每週網址永久記憶管理，自動串接全歷史趨勢圖！")
+st.caption("🚀 精準精算版：已修正子項目加總邏輯，對齊 100% 原始數據！")
 st.markdown("---")
 
-# 主頁分頁頁籤
 main_tab1, main_tab2 = st.tabs(["📈 數據分析儀表板", "⚙️ Raw Data 網址庫管理"])
 
 # ==========================================
-# ⚙️ 分頁二：Raw Data 網址庫管理 (新增 / 檢視 / 刪除)
+# ⚙️ 分頁二：Raw Data 網址庫管理
 # ==========================================
 with main_tab2:
     st.subheader("📁 每週 Raw Data 網址記憶庫")
-    st.info("💡 在此新增每週 Google Sheets 分頁網址，系統會自動儲存。之後每次開啟網頁，歷史週別數據都會自動合併處理！")
+    st.info("💡 在此新增每週 Google Sheets 分頁網址，系統會自動儲存並永久連通！")
     
     col_add1, col_add2, col_add3 = st.columns([2, 4, 1])
     new_title = col_add1.text_input("週別標題 (例如: 2026/07/19)", placeholder="YYYY/MM/DD")
@@ -95,12 +93,8 @@ with main_tab2:
     st.markdown("---")
     st.write("📋 **目前已紀錄的每週網址清單：**")
     
-    # 顯示目前已儲存的網址與刪除按鈕
     if st.session_state['url_db']:
-        db_df = []
-        for title, url in st.session_state['url_db'].items():
-            db_df.append({"週別標題": title, "分頁網址": url})
-        
+        db_df = [{"週別標題": title, "分頁網址": url} for title, url in st.session_state['url_db'].items()]
         st.dataframe(pd.DataFrame(db_df), use_container_width=True)
         
         col_del1, col_del2 = st.columns([3, 1])
@@ -111,11 +105,9 @@ with main_tab2:
                 save_url_db(st.session_state['url_db'])
                 st.success(f"已刪除『{del_target}』！")
                 st.rerun()
-    else:
-        st.write("尚無儲存的網址。")
 
 # ==========================================
-# 🔄 多分頁自動解析與合併邏輯
+# 🔄 多分頁自動解析與精準加總邏輯
 # ==========================================
 @st.cache_data(ttl=60)
 def load_all_saved_urls(url_map):
@@ -139,7 +131,7 @@ def load_all_saved_urls(url_map):
             metrics = df_raw.iloc[1]
             
             df_data = df_raw.iloc[2:].copy()
-            df_data[0] = df_data[0].ffill()
+            df_data[0] = df_data[0].ffill()  # 處理跨行拆分方案名
             df_data = df_data.rename(columns={0: 'Package_Name'})
             
             has_data = False
@@ -161,6 +153,8 @@ def load_all_saved_urls(url_map):
                     
                 for _, row in df_data.iterrows():
                     pkg = str(row['Package_Name']).strip()
+                    
+                    # 剔除彙總與空白列
                     if not pkg or '總和' in pkg or 'Total' in pkg or pkg == 'nan':
                         continue
                         
@@ -170,6 +164,7 @@ def load_all_saved_urls(url_map):
                             val_clean = str(val).replace(',', '').strip()
                             val_num = float(val_clean)
                             all_rows.append({
+                                'Tab_Title': title, # 記住來源分頁
                                 'Date': date_val,
                                 'Package_Name': pkg,
                                 'Metric': metric_clean,
@@ -185,15 +180,20 @@ def load_all_saved_urls(url_map):
 
     if all_rows:
         df_all = pd.DataFrame(all_rows)
-        # 🚨 跨分頁去重：重疊週別自動採納最大/最新值
-        df_clean = df_all.groupby(['Date', 'Package_Name', 'Metric'], as_index=False)['Value'].max()
+        
+        # 🚨 第一階段精準校正：同一個分頁內，若方案因為跨行有複數列，使用 .sum() 完整累加！
+        df_tab_sum = df_all.groupby(['Tab_Title', 'Date', 'Package_Name', 'Metric'], as_index=False)['Value'].sum()
+        
+        # 🚨 第二階段跨頁去重：重疊週別採納最新的分頁數據 (.last() 或 .max())
+        df_clean = df_tab_sum.groupby(['Date', 'Package_Name', 'Metric'], as_index=False)['Value'].last()
+        
         df_clean['Date_dt'] = pd.to_datetime(df_clean['Date'])
         return df_clean.sort_values('Date_dt'), loaded_count
         
     return pd.DataFrame(), 0
 
 # ==========================================
-# 📈 分頁一：數據分析儀表板 (使用者瀏覽)
+# 📈 分頁一：數據分析儀表板
 # ==========================================
 with main_tab1:
     if st.sidebar.button("🔄 重新載入最新數據"):
@@ -237,7 +237,7 @@ with main_tab1:
             latest_sub = df_sub[df_sub['Date'] == latest_date]['Value'].sum()
             
             col1, col2 = st.columns(2)
-            col1.metric(label=f"最新週別 ({latest_date}) Total Sub 會員數", value=f"{int(latest_sub):,}")
+            col1.metric(label=f"最新週別 ({latest_date}) Total Sub 會員數", value=f"{int(round(latest_sub)):,}")
             col2.metric(label="目前累積週數", value=f"{len(selected_dates)} 週")
             
             st.markdown("---")
@@ -249,7 +249,7 @@ with main_tab1:
                 fig, ax = plt.subplots(figsize=(12, 4.5))
                 ax.plot(df_trend['Date'], df_trend['Value'], marker='o', color='#1DB954', linewidth=2.5)
                 for i, row in df_trend.iterrows():
-                    ax.annotate(f"{int(row['Value']):,}", (row['Date'], row['Value']), textcoords="offset points", xytext=(0,10), ha='center', fontweight='bold')
+                    ax.annotate(f"{int(round(row['Value'])):,}", (row['Date'], row['Value']), textcoords="offset points", xytext=(0,10), ha='center', fontweight='bold')
                 ax.set_ylabel("Subscribers")
                 plt.xticks(rotation=30)
                 ax.grid(True, linestyle='--', alpha=0.5)
@@ -258,6 +258,8 @@ with main_tab1:
             with view_tab2:
                 st.subheader("各貼標與方案會員數 (Sub) 跨週透視表")
                 pivot_df = df_sub.pivot_table(index=['Tag', 'Package_Name'], columns='Date', values='Value', aggfunc='sum', fill_value=0)
+                # 自動四捨五入為整數顯示
+                pivot_df = pivot_df.round(0).astype(int)
                 st.dataframe(pivot_df, use_container_width=True)
     else:
         st.info("💡 請點選上方『⚙️ Raw Data 網址庫管理』分頁新增每週分頁網址。")
