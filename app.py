@@ -1,16 +1,15 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import gdown
 import os
 import glob
 import shutil
-import urllib.request
-import json
 
 st.set_page_config(page_title="KKBOX 會員數據自動化分析系統", layout="wide", page_icon="📊")
 
 # ==========================================
-# 🔑 1. 鎖定固定的 Google Drive 資料夾 ID
+# 🔑 1. 正確的 Google Drive 資料夾 ID
 # ==========================================
 FIXED_DRIVE_FOLDER_ID = "1YjLkuX_BuEeWvsWTuH_kT7Wmei7edFO_"
 
@@ -45,9 +44,9 @@ st.caption("🚀 已連動固定雲端資料庫，自動讀取最新週別 Raw D
 st.markdown("---")
 
 # ==========================================
-# 🔄 3. 使用 Drive 直連解析服務 (克服 Google 擋資料夾問題)
+# 🔄 3. 自動從 Google Drive 下載與解析檔案
 # ==========================================
-@st.cache_data(ttl=1800)  # 快取 30 分鐘
+@st.cache_data(ttl=1800)
 def load_data_from_drive(folder_id):
     parsed_rows = []
     download_dir = "./drive_raw_data"
@@ -59,9 +58,7 @@ def load_data_from_drive(folder_id):
             pass
     os.makedirs(download_dir, exist_ok=True)
     
-    # 透過 Google Drive API 繞過封鎖
     try:
-        import gdown
         url = f"https://drive.google.com/drive/folders/{folder_id}"
         gdown.download_folder(url, output=download_dir, quiet=True, use_cookies=False)
     except Exception as e:
@@ -69,9 +66,8 @@ def load_data_from_drive(folder_id):
 
     excel_files = glob.glob(f"{download_dir}/*.xlsx") + glob.glob(f"{download_dir}/*.xls") + glob.glob(f"{download_dir}/*/*.xlsx") + glob.glob(f"{download_dir}/*/*.xls")
     
-    # 萬一資料夾整包被阻擋，提供備用入口
     if not excel_files:
-        st.warning("⚠️ 雲端資料夾受到 Google 安全防護阻擋，請確認資料夾共用設定為『知道連結者皆可檢視』。")
+        st.warning("⚠️ 雲端資料夾暫無檔案，或下載受阻。請確認資料夾內有 Excel 檔並開啟『知道連結者皆可檢視』。")
         return pd.DataFrame()
 
     for file_path in excel_files:
@@ -125,11 +121,10 @@ if st.sidebar.button("🔄 手動同步最新 Drive 資料"):
     st.cache_data.clear()
     st.rerun()
 
-# 備用手動上傳 (萬一雲端防護無法解除時)
+# 備用手動上傳區
 st.sidebar.markdown("---")
 uploaded_backup = st.sidebar.file_uploader("📂 (備用) 上傳每週 Raw Data Excel", type=["xlsx", "xls"], accept_multiple_files=True)
 
-# 載入資料
 df_clean = pd.DataFrame()
 if uploaded_backup:
     parsed_rows = []
@@ -163,7 +158,7 @@ if uploaded_backup:
         df_clean['Date_dt'] = pd.to_datetime(df_clean['Date'])
         df_clean = df_clean.sort_values('Date_dt')
 else:
-    with st.spinner("⏳ 正在同步 Google Drive 資料庫..."):
+    with st.spinner("⏳ 正在與 Google Drive 資料庫同步最新數據..."):
         df_clean = load_data_from_drive(FIXED_DRIVE_FOLDER_ID)
 
 if not df_clean.empty:
