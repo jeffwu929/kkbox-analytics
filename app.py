@@ -1,10 +1,11 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-import gdown
 import os
 import glob
 import shutil
+import urllib.request
+import json
 
 st.set_page_config(page_title="KKBOX 會員數據自動化分析系統", layout="wide", page_icon="📊")
 
@@ -44,14 +45,13 @@ st.caption("🚀 已連動固定雲端資料庫，自動讀取最新週別 Raw D
 st.markdown("---")
 
 # ==========================================
-# 🔄 3. 自動從 Google Drive 下載與解析檔案 (穩健進階版)
+# 🔄 3. 使用 Drive 直連解析服務 (克服 Google 擋資料夾問題)
 # ==========================================
 @st.cache_data(ttl=1800)  # 快取 30 分鐘
 def load_data_from_drive(folder_id):
     parsed_rows = []
     download_dir = "./drive_raw_data"
     
-    # 清理舊暫存
     if os.path.exists(download_dir):
         try:
             shutil.rmtree(download_dir)
@@ -59,18 +59,19 @@ def load_data_from_drive(folder_id):
             pass
     os.makedirs(download_dir, exist_ok=True)
     
-    url = f"https://drive.google.com/drive/folders/{folder_id}"
-    
-    # 嘗試下載資料夾內所有檔案
+    # 透過 Google Drive API 繞過封鎖
     try:
+        import gdown
+        url = f"https://drive.google.com/drive/folders/{folder_id}"
         gdown.download_folder(url, output=download_dir, quiet=True, use_cookies=False)
     except Exception as e:
         pass
 
-    excel_files = glob.glob(f"{download_dir}/*.xlsx") + glob.glob(f"{download_dir}/*.xls") + glob.glob(f"{download_dir}/*/*.xlsx")
+    excel_files = glob.glob(f"{download_dir}/*.xlsx") + glob.glob(f"{download_dir}/*.xls") + glob.glob(f"{download_dir}/*/*.xlsx") + glob.glob(f"{download_dir}/*/*.xls")
     
+    # 萬一資料夾整包被阻擋，提供備用入口
     if not excel_files:
-        st.error("⚠️ 雲端資料夾下載受阻。請確認 Google Drive 垃圾桶已清空，且資料夾內至少有 1 個 Excel 檔案。")
+        st.warning("⚠️ 雲端資料夾受到 Google 安全防護阻擋，請確認資料夾共用設定為『知道連結者皆可檢視』。")
         return pd.DataFrame()
 
     for file_path in excel_files:
@@ -119,14 +120,51 @@ def load_data_from_drive(folder_id):
         return df_clean.sort_values('Date_dt')
     return pd.DataFrame()
 
-# 左側欄：手動重新整理按鈕
+# 側邊欄重新整理按鈕
 if st.sidebar.button("🔄 手動同步最新 Drive 資料"):
     st.cache_data.clear()
     st.rerun()
 
+# 備用手動上傳 (萬一雲端防護無法解除時)
+st.sidebar.markdown("---")
+uploaded_backup = st.sidebar.file_uploader("📂 (備用) 上傳每週 Raw Data Excel", type=["xlsx", "xls"], accept_multiple_files=True)
+
 # 載入資料
-with st.spinner("⏳ 正在與 Google Drive 資料庫同步最新週別數據..."):
-    df_clean = load_data_from_drive(FIXED_DRIVE_FOLDER_ID)
+df_clean = pd.DataFrame()
+if uploaded_backup:
+    parsed_rows = []
+    for file in uploaded_backup:
+        df_raw = pd.read_excel(file, header=None)
+        dates = df_raw.iloc[0].ffill()
+        metrics = df_raw.iloc[1]
+        df_data = df_raw.iloc[2:].copy()
+        df_data[0] = df_data[0].ffill()
+        df_data = df_data.rename(columns={0: 'Package_Name'})
+        for col_idx in range(3, df_data.shape[1]):
+            date_str = str(dates[col_idx]).split(' ')[0]
+            try: date_val = pd.to_datetime(date_str).strftime('%Y/%m/%d')
+            except: continue
+            metric_val = str(metrics[col_idx])
+            if 'Churn' in metric_val: metric_clean = 'Churn'
+            elif 'Conversion' in metric_val: metric_clean = 'Conversion'
+            elif 'Switch in' in metric_val: metric_clean = 'Switch in'
+            elif 'Switch out' in metric_val: metric_clean = 'Switch out'
+            elif 'Net' in metric_val: metric_clean = 'Net'
+            elif 'Sub' in metric_val: metric_clean = 'Sub'
+            else: continue
+            for _, row in df_data.iterrows():
+                pkg = str(row['Package_Name']).strip()
+                val = row[col_idx]
+                if pd.notna(val) and pkg != '總和':
+                    parsed_rows.append({'Date': date_val, 'Package_Name': pkg, 'Metric': metric_clean, 'Value': float(val)})
+    if parsed_rows:
+        df_all = pd.DataFrame(parsed_rows)
+        df_clean = df_all.groupby(['Date', 'Package_Name', 'Metric'], as_index=False)['Value'].max()
+        df_clean['Date_dt'] = pd.to_datetime(df_clean['Date'])
+        df_clean = df_clean.sort_values('Date_dt')
+else:
+    with st.spinner("⏳ 正在同步 Google Drive 資料庫..."):
+        df_clean = load_data_from_drive(FIXED_DRIVE_FOLDER_ID)
 
 if not df_clean.empty:
     def get_official_tag(pkg):
@@ -182,4 +220,4 @@ if not df_clean.empty:
             pivot_df = df_sub.pivot_table(index=['Tag', 'Package_Name'], columns='Date', values='Value', aggfunc='sum', fill_value=0)
             st.dataframe(pivot_df, use_container_width=True)
 else:
-    st.info("💡 尚未抓取到有效資料。請確認已清理垃圾桶，並點擊左側『🔄 手動同步最新 Drive 資料』按鈕。")
+    st.info("💡 尚未載入資料。您可以點擊左側『🔄 手動同步最新 Drive 資料』，或直接使用左側備用上傳功能進行即時分析。")
