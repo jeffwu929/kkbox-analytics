@@ -44,14 +44,14 @@ st.caption("🚀 已連動固定雲端資料庫，自動讀取最新週別 Raw D
 st.markdown("---")
 
 # ==========================================
-# 🔄 3. 自動從 Google Drive 下載與解析檔案 (含強化容錯)
+# 🔄 3. 自動從 Google Drive 下載與解析檔案 (穩健進階版)
 # ==========================================
 @st.cache_data(ttl=1800)  # 快取 30 分鐘
 def load_data_from_drive(folder_id):
     parsed_rows = []
     download_dir = "./drive_raw_data"
     
-    # 每次重新下載前先清理暫存資料夾，避免舊檔干擾
+    # 清理舊暫存
     if os.path.exists(download_dir):
         try:
             shutil.rmtree(download_dir)
@@ -59,16 +59,20 @@ def load_data_from_drive(folder_id):
             pass
     os.makedirs(download_dir, exist_ok=True)
     
+    url = f"https://drive.google.com/drive/folders/{folder_id}"
+    
+    # 嘗試下載資料夾內所有檔案
     try:
-        url = f"https://drive.google.com/drive/folders/{folder_id}"
-        # 增加 ignore_cookies 避免失效檔案阻斷整體流程
         gdown.download_folder(url, output=download_dir, quiet=True, use_cookies=False)
     except Exception as e:
-        # 即使部分失效檔案報錯，只要已有下載成功的檔案就繼續處理
-        st.warning("⚠️ 雲端資料夾中包含無效或已刪除的檔案連結，系統已自動排除並繼續解析有效檔案。")
+        pass
 
-    excel_files = glob.glob(f"{download_dir}/*.xlsx") + glob.glob(f"{download_dir}/*.xls")
+    excel_files = glob.glob(f"{download_dir}/*.xlsx") + glob.glob(f"{download_dir}/*.xls") + glob.glob(f"{download_dir}/*/*.xlsx")
     
+    if not excel_files:
+        st.error("⚠️ 雲端資料夾下載受阻。請確認 Google Drive 垃圾桶已清空，且資料夾內至少有 1 個 Excel 檔案。")
+        return pd.DataFrame()
+
     for file_path in excel_files:
         try:
             df_raw = pd.read_excel(file_path, header=None)
@@ -110,13 +114,12 @@ def load_data_from_drive(folder_id):
 
     if parsed_rows:
         df_all = pd.DataFrame(parsed_rows)
-        # 多檔去重：重疊日期與方案取最大值
         df_clean = df_all.groupby(['Date', 'Package_Name', 'Metric'], as_index=False)['Value'].max()
         df_clean['Date_dt'] = pd.to_datetime(df_clean['Date'])
         return df_clean.sort_values('Date_dt')
     return pd.DataFrame()
 
-# 側邊欄：手動重新整理按鈕
+# 左側欄：手動重新整理按鈕
 if st.sidebar.button("🔄 手動同步最新 Drive 資料"):
     st.cache_data.clear()
     st.rerun()
@@ -179,4 +182,4 @@ if not df_clean.empty:
             pivot_df = df_sub.pivot_table(index=['Tag', 'Package_Name'], columns='Date', values='Value', aggfunc='sum', fill_value=0)
             st.dataframe(pivot_df, use_container_width=True)
 else:
-    st.info("💡 尚未抓取到有效資料。請確認資料夾內有正確的 Raw Data Excel 檔案，並點擊左邊欄的『手動同步最新 Drive 資料』按鈕。")
+    st.info("💡 尚未抓取到有效資料。請確認已清理垃圾桶，並點擊左側『🔄 手動同步最新 Drive 資料』按鈕。")
