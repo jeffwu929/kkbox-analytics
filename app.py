@@ -1,128 +1,135 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-import requests
-import io
+import gdown
 import os
+import glob
 
 st.set_page_config(page_title="KKBOX 會員數據自動化分析系統", layout="wide", page_icon="📊")
 
 # ==========================================
-# 🏷️ 1. 內建方案貼標字典 (有新增可在此擴充或於網頁動態新增)
+# 🔑 1. 固定 Google Drive 資料夾 ID (請在下方貼上你的 ID)
 # ==========================================
-DEFAULT_TAG_MAP = {
-    # 自營案範例 (請依實際名稱調整)
-    '個人月租': '自營案',
-    '學生方案': '自營案',
-    '家庭方案': '自營案',
-    # 搭售案範例
-    '電信綁約': '搭售案',
-    '寬頻搭售': '搭售案',
-    # 搭贈案範例
-    '買一送一免費': '搭贈案',
-    '首月免費3M': '搭贈案',
+FIXED_DRIVE_FOLDER_ID = "1YjLkuX_BuEeWvsWTuH_kT7Wmei7edFO_"
+
+# ==========================================
+# 🏷️ 2. 100% 官方內建對照字典 (已完整綁定 package_tags.xlsx)
+# ==========================================
+OFFICIAL_TAG_MAP = {
+    '[台哥大方案] 無損音質 24M優惠$209': '搭售',
+    '[台哥大方案] 無損音質單月免綁約': '無約',
+    '[台哥大方案] 標準音質': '無約',
+    '[台哥大方案] 標準音質3M免費': '搭贈',
+    '[台哥大方案] 標準音質6M優惠$134': '搭售',
+    '[台哥大方案] 標準音質12M優惠$129': '搭售',
+    '[台哥大方案] 標準音質24M優惠$89': '搭售',
+    '[台哥大方案] 標準音質24M優惠$109': '搭售',
+    '[台哥大方案] 標準音質30M優惠$89': '搭售',
+    '[台哥大方案] 標準音質優惠月租方案': '無約',
+    '[台灣大哥大] 個人方案 - 月租$109': '搭售',
+    '[台灣大哥大] 個人方案 - 月租$119': '搭售',
+    '[台灣大哥大] 個人方案 - 月租$129': '搭售',
+    '[台灣大哥大] 個人方案 - 月租$139': '搭售',
+    '[台灣大哥大] 個人方案 - 月租$159': '搭售',
+    '[台灣大哥大] 個人方案 - 首3月$0': '搭贈',
+    '[台灣大哥大] 學生方案 - 月租$89': '搭售'
 }
 
-# 使用 Session State 記錄貼標字典，讓使用者能在網頁動態新增
 if 'tag_map' not in st.session_state:
-    st.session_state['tag_map'] = DEFAULT_TAG_MAP.copy()
+    st.session_state['tag_map'] = OFFICIAL_TAG_MAP.copy()
 
 st.title("📊 KKBOX 會員數據自動化分析系統 (週視角)")
-st.caption("🚀 已串接 Google Drive 自動讀取 Raw Data，無需手動上傳！")
+st.caption("🚀 已連動雲端資料庫，自動同步最新 RAW Data！")
 st.markdown("---")
 
 # ==========================================
-# 📁 2. Google Drive 資料來源設定
+# 🔄 3. 自動從 Google Drive 下載與解析檔案
 # ==========================================
-st.sidebar.header("⚙️ 系統設定")
-drive_folder_id = st.sidebar.text_input(
-    "Google Drive 資料夾 ID", 
-    value="", 
-    help="請貼上您 Google Drive Raw Data 資料夾網址中 id= 後面或是 folders/ 後面那一串字串"
-)
-
-# 備用上傳區（若未設定 Drive 或是需要臨時測試）
-uploaded_files = st.sidebar.file_uploader("📂 (備用) 手動上傳 Raw Data", type=["xlsx", "xls"], accept_multiple_files=True)
-
-all_parsed_rows = []
-
-# --- 邏輯 A：從 Google Drive 讀取 (如有設定 ID) ---
-if drive_folder_id:
-    st.sidebar.info("🔄 正在讀取 Google Drive 資料庫...")
-    # 這裡可透過 gdown / Drive API 自動搜尋資料夾內容
-    # 為確保展示流暢，支援直接從 Google Drive 共用連結讀取
-
-# --- 邏輯 B：讀取手動上傳或範例檔 ---
-files_to_process = uploaded_files if uploaded_files else []
-
-if files_to_process:
-    for uploaded_file in files_to_process:
-        df_raw = pd.read_excel(uploaded_file, header=None)
-        dates = df_raw.iloc[0].ffill()
-        metrics = df_raw.iloc[1]
-        
-        df_data = df_raw.iloc[2:].copy()
-        df_data[0] = df_data[0].ffill()
-        df_data = df_data.rename(columns={0: 'Package_Name'})
-        
-        for col_idx in range(3, df_data.shape[1]):
-            date_str = str(dates[col_idx]).split(' ')[0]
-            try:
-                date_val = pd.to_datetime(date_str).strftime('%Y/%m/%d')
-            except:
-                continue
-                
-            metric_val = str(metrics[col_idx])
-            if 'Churn' in metric_val: metric_clean = 'Churn'
-            elif 'Conversion' in metric_val: metric_clean = 'Conversion'
-            elif 'Switch in' in metric_val: metric_clean = 'Switch in'
-            elif 'Switch out' in metric_val: metric_clean = 'Switch out'
-            elif 'Net' in metric_val: metric_clean = 'Net'
-            elif 'Sub' in metric_val: metric_clean = 'Sub'
-            else: continue
-                
-            for _, row in df_data.iterrows():
-                pkg = str(row['Package_Name']).strip()
-                val = row[col_idx]
-                if pd.notna(val) and pkg != '總和':
-                    all_parsed_rows.append({
-                        'Date': date_val,
-                        'Package_Name': pkg,
-                        'Metric': metric_clean,
-                        'Value': float(val)
-                    })
-
-if all_parsed_rows:
-    df_all = pd.DataFrame(all_parsed_rows)
-    df_clean = df_all.groupby(['Date', 'Package_Name', 'Metric'], as_index=False)['Value'].max()
-    df_clean['Date_dt'] = pd.to_datetime(df_clean['Date'])
-    df_clean = df_clean.sort_values('Date_dt')
+@st.cache_data(ttl=1800)  # 快取 30 分鐘，避免頻繁請求
+def load_data_from_drive(folder_id):
+    parsed_rows = []
+    download_dir = "./drive_raw_data"
+    os.makedirs(download_dir, exist_ok=True)
     
-    # 🧠 3. 自動套用內建 Tag 判斷
-    def apply_smart_tag(pkg):
-        if pkg in st.session_state['tag_map']:
-            return st.session_state['tag_map'][pkg]
-        # 內建關鍵字模糊比對
-        if '免費' in pkg or '3M' in pkg or '贈' in pkg:
-            return '搭贈案'
-        elif '個人' in pkg or '月租' in pkg or '家庭' in pkg or '學生' in pkg:
-            return '自營案'
-        elif '綁約' in pkg or '電信' in pkg:
-            return '搭售案'
-        else:
-            return '🚨 未分類新方案'
+    try:
+        url = f"https://drive.google.com/drive/folders/{folder_id}"
+        gdown.download_folder(url, output=download_dir, quiet=True, remaining_ok=True)
+    except Exception as e:
+        st.error(f"❌ Google Drive 讀取失敗，請確認資料夾權限已開啟『知道連結的人皆可檢視』。錯誤訊息：{e}")
+        return pd.DataFrame()
 
-    df_clean['Tag'] = df_clean['Package_Name'].apply(apply_smart_tag)
+    excel_files = glob.glob(f"{download_dir}/*.xlsx") + glob.glob(f"{download_dir}/*.xls")
     
-    # 🚨 4. 新方案自動攔截與維護介面
+    for file_path in excel_files:
+        try:
+            df_raw = pd.read_excel(file_path, header=None)
+            dates = df_raw.iloc[0].ffill()
+            metrics = df_raw.iloc[1]
+            
+            df_data = df_raw.iloc[2:].copy()
+            df_data[0] = df_data[0].ffill()
+            df_data = df_data.rename(columns={0: 'Package_Name'})
+            
+            for col_idx in range(3, df_data.shape[1]):
+                date_str = str(dates[col_idx]).split(' ')[0]
+                try:
+                    date_val = pd.to_datetime(date_str).strftime('%Y/%m/%d')
+                except:
+                    continue
+                    
+                metric_val = str(metrics[col_idx])
+                if 'Churn' in metric_val: metric_clean = 'Churn'
+                elif 'Conversion' in metric_val: metric_clean = 'Conversion'
+                elif 'Switch in' in metric_val: metric_clean = 'Switch in'
+                elif 'Switch out' in metric_val: metric_clean = 'Switch out'
+                elif 'Net' in metric_val: metric_clean = 'Net'
+                elif 'Sub' in metric_val: metric_clean = 'Sub'
+                else: continue
+                    
+                for _, row in df_data.iterrows():
+                    pkg = str(row['Package_Name']).strip()
+                    val = row[col_idx]
+                    if pd.notna(val) and pkg != '總和':
+                        parsed_rows.append({
+                            'Date': date_val,
+                            'Package_Name': pkg,
+                            'Metric': metric_clean,
+                            'Value': float(val)
+                        })
+        except Exception:
+            continue
+
+    if parsed_rows:
+        df_all = pd.DataFrame(parsed_rows)
+        # 多檔去重：若有重疊日期與方案，取最大值
+        df_clean = df_all.groupby(['Date', 'Package_Name', 'Metric'], as_index=False)['Value'].max()
+        df_clean['Date_dt'] = pd.to_datetime(df_clean['Date'])
+        return df_clean.sort_values('Date_dt')
+    return pd.DataFrame()
+
+# 左側按鈕：同步最新 Drive 資料
+if st.sidebar.button("🔄 手動同步最新 Drive 資料"):
+    st.cache_data.clear()
+    st.rerun()
+
+# 載入資料
+with st.spinner("⏳ 正在與 Google Drive 資料庫同步最新週別數據..."):
+    df_clean = load_data_from_drive(FIXED_DRIVE_FOLDER_ID)
+
+if not df_clean.empty:
+    def get_official_tag(pkg):
+        return st.session_state['tag_map'].get(pkg, '🚨 未分類新方案')
+
+    df_clean['Tag'] = df_clean['Package_Name'].apply(get_official_tag)
+    
+    # 🚨 4. 新方案自動攔截與動態設定
     unknown_pkgs = df_clean[df_clean['Tag'] == '🚨 未分類新方案']['Package_Name'].unique().tolist()
-    
     if unknown_pkgs:
-        st.warning(f"🚨 系統發現 {len(unknown_pkgs)} 個「未設定貼標的新方案」！請在下方為其歸類：")
-        with st.expander("🛠️ 點此快速設定新方案貼標", expanded=True):
+        st.warning(f"🚨 提醒：發現 {len(unknown_pkgs)} 個尚未在官方對照表中的新方案！請在下方指定分類：")
+        with st.expander("🛠️ 點此快速維護新方案貼標", expanded=True):
             col_a, col_b, col_c = st.columns([2, 2, 1])
             selected_new_pkg = col_a.selectbox("選擇新方案：", unknown_pkgs)
-            assign_tag = col_b.selectbox("指定貼標分類：", ["自營案", "搭售案", "搭贈案", "其他"])
+            assign_tag = col_b.selectbox("指定官方 Tag：", ["搭售", "無約", "搭贈", "其他"])
             if col_c.button("💾 儲存分類"):
                 st.session_state['tag_map'][selected_new_pkg] = assign_tag
                 st.success(f"✅ 已成功將「{selected_new_pkg}」歸類為 [{assign_tag}]！")
@@ -142,7 +149,7 @@ if all_parsed_rows:
         
         col1, col2 = st.columns(2)
         col1.metric(label=f"最新週別 ({latest_date}) Total Sub 會員數", value=f"{int(latest_sub):,}")
-        col2.metric(label="目前檢視週數", value=f"{len(selected_dates)} 週")
+        col2.metric(label="涵蓋週數", value=f"{len(selected_dates)} 週")
         
         st.markdown("---")
         tab1, tab2 = st.tabs(["📊 每週 Total Sub 趨勢圖", "📋 週視角方案透視表"])
@@ -162,6 +169,5 @@ if all_parsed_rows:
             st.subheader("各貼標與方案會員數 (Sub) 透視表")
             pivot_df = df_sub.pivot_table(index=['Tag', 'Package_Name'], columns='Date', values='Value', aggfunc='sum', fill_value=0)
             st.dataframe(pivot_df, use_container_width=True)
-
 else:
-    st.info("👈 請在左側設定 Google Drive 資料夾 ID，或備用手動上傳檔案進行分析。")
+    st.info("💡 尚未抓取到資料。請確認已將 Google Drive 資料夾權限設定為『知道連結的人皆可檢視』，並確認資料夾內有放 Raw Data Excel 檔案。")
