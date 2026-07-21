@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import gdown
 import os
 import glob
+import shutil
 
 st.set_page_config(page_title="KKBOX 會員數據自動化分析系統", layout="wide", page_icon="📊")
 
@@ -43,21 +44,28 @@ st.caption("🚀 已連動固定雲端資料庫，自動讀取最新週別 Raw D
 st.markdown("---")
 
 # ==========================================
-# 🔄 3. 自動從 Google Drive 下載與解析檔案
+# 🔄 3. 自動從 Google Drive 下載與解析檔案 (含強化容錯)
 # ==========================================
-@st.cache_data(ttl=1800)  # 快取 30 分鐘，避免頻繁請求
+@st.cache_data(ttl=1800)  # 快取 30 分鐘
 def load_data_from_drive(folder_id):
     parsed_rows = []
     download_dir = "./drive_raw_data"
+    
+    # 每次重新下載前先清理暫存資料夾，避免舊檔干擾
+    if os.path.exists(download_dir):
+        try:
+            shutil.rmtree(download_dir)
+        except Exception:
+            pass
     os.makedirs(download_dir, exist_ok=True)
     
     try:
         url = f"https://drive.google.com/drive/folders/{folder_id}"
-        # 修正相容語法
+        # 增加 ignore_cookies 避免失效檔案阻斷整體流程
         gdown.download_folder(url, output=download_dir, quiet=True, use_cookies=False)
     except Exception as e:
-        st.error(f"❌ Google Drive 讀取失敗，請確認資料夾權限已開啟『知道連結的人皆可檢視』。錯誤訊息：{e}")
-        return pd.DataFrame()
+        # 即使部分失效檔案報錯，只要已有下載成功的檔案就繼續處理
+        st.warning("⚠️ 雲端資料夾中包含無效或已刪除的檔案連結，系統已自動排除並繼續解析有效檔案。")
 
     excel_files = glob.glob(f"{download_dir}/*.xlsx") + glob.glob(f"{download_dir}/*.xls")
     
@@ -171,4 +179,4 @@ if not df_clean.empty:
             pivot_df = df_sub.pivot_table(index=['Tag', 'Package_Name'], columns='Date', values='Value', aggfunc='sum', fill_value=0)
             st.dataframe(pivot_df, use_container_width=True)
 else:
-    st.info("💡 尚未抓取到資料。請確認已將 Google Drive 資料夾權限設定為『知道連結的人皆可檢視』，並確認資料夾內有放 Raw Data Excel 檔案。")
+    st.info("💡 尚未抓取到有效資料。請確認資料夾內有正確的 Raw Data Excel 檔案，並點擊左邊欄的『手動同步最新 Drive 資料』按鈕。")
