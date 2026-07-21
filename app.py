@@ -14,6 +14,23 @@ except ImportError:
 
 st.set_page_config(page_title="KKBOX 會員數據自動化分析系統", layout="wide", page_icon="📊")
 
+# 注入 CSS 樣式：強制全網頁的 Streamlit DataFrame / Table 儲存格全部文字置中
+st.markdown("""
+    <style>
+    /* 強制所有表格內文與標題置中 */
+    [data-testid="stDataFrame"] div[data-testid="stTable"] div {
+        text-align: center !important;
+    }
+    .stDataFrame th, .stDataFrame td {
+        text-align: center !important;
+    }
+    div[data-testid="stTable"] table {
+        margin-left: auto;
+        margin-right: auto;
+    }
+    </style>
+""", unsafe_allow_html=True)
+
 CONFIG_FILE = "sheet_urls_db.json"
 TARGETS_FILE = "monthly_targets_db.json"
 TAGS_FILE = "package_tags_db.json"
@@ -295,13 +312,13 @@ with main_tab1:
                 matched_date_str = available_dates[0]
             st.sidebar.info(f"🎯 自動判別對應週別為：**{matched_date_str}**")
 
-        # 📅 2. 週別區間篩選 (增加「近 5 週」)
+        # 📅 2. 週別區間篩選
         st.sidebar.subheader("📅 2. 週別區間篩選")
         quick_select = st.sidebar.selectbox("🚀 快速時間選擇：", ["自動連動指定日期", "近 4 週", "近 5 週", "近 8 週", "近 12 週", "全選", "自訂"])
         
         if quick_select == "自動連動指定日期" and matched_date_str:
             idx = available_dates.index(matched_date_str) if matched_date_str in available_dates else len(available_dates)-1
-            start_idx = max(0, idx - 4) # 展示當週及前 4 週共 5 週
+            start_idx = max(0, idx - 4)
             default_selected = available_dates[start_idx:idx+1]
         elif quick_select == "近 4 週":
             default_selected = available_dates[-4:] if len(available_dates) >= 4 else available_dates
@@ -413,75 +430,72 @@ with main_tab1:
                 else:
                     formatted_pivot = pivot_df.applymap(lambda x: f"{x:,}")
                     
-                # 數字與標頭全面置中
-                st.dataframe(formatted_pivot.style.set_properties(**{'text-align': 'center'}), use_container_width=True)
+                # 使用 HTML 渲染表格確保內文與標題100%絕對置中
+                st.write(formatted_pivot.to_html(classes='custom-table', justify='center'), unsafe_allow_html=True)
 
             # ====================================================
-            # 兩大類之二：方案類型佔比分析 (含跨週動態比較欄位)
+            # 兩大類之二：方案類型佔比分析 (按 Conversion/Churn/Switch 跨週展表)
             # ====================================================
             with sub_tab2:
-                base_date_str = selected_dates[0] # 選取區間的起始對照週
+                st.subheader("🧩 各方案類型營運指標跨週趨勢分析")
+                st.caption("💡 可在下方切換不同指標，檢視各方案類型在選定時間區間內的每週變化明細：")
                 
-                st.subheader(f"🧩 方案類型佔比分析 (本週: {latest_date_str} vs 對照週: {base_date_str})")
-                st.caption(f"💡 本區塊自動對比您選取的【{len(selected_dates)} 週時間區間】內，最新週與對照週（{base_date_str}）的 Conversion、Churn、Switch in/out 指標增減變化：")
+                metric_tabs = st.tabs(["1. Conversion (轉換)", "2. Churn (流失)", "3. Switch-in (轉入)", "4. Switch-out (轉出)", "5. Sub (當週會員)"])
                 
-                # 計算最新週與對照週的各 Tag 彙總數據
-                df_latest_all = df_filtered[df_filtered['Date'] == latest_date_str]
-                df_base_all = df_filtered[df_filtered['Date'] == base_date_str]
+                metrics_map = {
+                    "1. Conversion (轉換)": "Conversion",
+                    "2. Churn (流失)": "Churn",
+                    "3. Switch-in (轉入)": "Switch in",
+                    "4. Switch-out (轉出)": "Switch out",
+                    "5. Sub (當週會員)": "Sub"
+                }
                 
-                tag_latest = df_latest_all.pivot_table(index='方案類型', columns='Metric', values='Value', aggfunc='sum', fill_value=0)
-                tag_base = df_base_all.pivot_table(index='方案類型', columns='Metric', values='Value', aggfunc='sum', fill_value=0)
-                
-                metrics_list = ['Sub', 'Conversion', 'Churn', 'Switch in', 'Switch out']
-                for m in metrics_list:
-                    if m not in tag_latest.columns: tag_latest[m] = 0
-                    if m not in tag_base.columns: tag_base[m] = 0
-                
-                comp_display = pd.DataFrame(index=tag_latest.index)
-                comp_display['Sub (本週)'] = tag_latest['Sub'].round(0).astype(int)
-                
-                # 動態加入各指標的本週數值與對照增減
-                for m_name, m_key in [('Conversion', 'Conversion'), ('Churn', 'Churn'), ('Switch-in', 'Switch in'), ('Switch-out', 'Switch out')]:
-                    l_v = tag_latest[m_key]
-                    b_v = tag_base[m_key]
-                    diff_v = l_v - b_v
-                    
-                    comp_display[f'{m_name} (本週)'] = l_v.round(0).astype(int).apply(lambda x: f"{x:,}")
-                    comp_display[f'{m_name} 較對照週增減'] = diff_v.round(0).astype(int).apply(lambda x: f"{'+' if x>0 else ''}{x:,}")
-
-                col_comp1, col_comp2 = st.columns([3, 2])
-                
-                with col_comp1:
-                    st.write("**📋 方案類型指標與跨週比較總覽表：**")
-                    # 數字與標頭全面置中
-                    st.dataframe(comp_display.style.set_properties(**{'text-align': 'center'}), use_container_width=True)
-                    
-                with col_comp2:
-                    st.write("**🍰 Sub 會員數方案類型佔比：**")
-                    if 'Sub (本週)' in comp_display.columns and comp_display['Sub (本週)'].sum() > 0:
-                        sub_by_tag = comp_display['Sub (本週)'].reset_index()
+                for tab_name, metric_key in metrics_map.items():
+                    with metric_tabs[list(metrics_map.keys()).index(tab_name)]:
+                        st.write(f"**📋 各方案類型【{metric_key}】每週數據明細表：**")
+                        df_metric = df_filtered[df_filtered['Metric'] == metric_key]
                         
-                        if HAS_PLOTLY:
-                            fig_plotly = px.pie(
-                                sub_by_tag, 
-                                names='方案類型', 
-                                values='Sub (本週)',
-                                color_discrete_sequence=['#1DB954', '#4B9CD3', '#FF9F1C', '#E50914', '#9B59B6'],
-                                hole=0.3
-                            )
-                            fig_plotly.update_traces(textposition='inside', textinfo='percent+label')
-                            fig_plotly.update_layout(
-                                margin=dict(t=10, b=10, l=10, r=10),
-                                showlegend=True
-                            )
-                            st.plotly_chart(fig_plotly, use_container_width=True)
+                        if not df_metric.empty:
+                            m_pivot = df_metric.pivot_table(index='方案類型', columns='Date', values='Value', aggfunc='sum', fill_value=0)
+                            m_pivot = m_pivot.round(0).astype(int)
+                            
+                            if hasattr(m_pivot, 'map'):
+                                formatted_m = m_pivot.map(lambda x: f"{x:,}")
+                            else:
+                                formatted_m = m_pivot.applymap(lambda x: f"{x:,}")
+                                
+                            # 使用 HTML 渲染確保置中
+                            st.write(formatted_m.to_html(justify='center'), unsafe_allow_html=True)
                         else:
-                            fig_m, ax_m = plt.subplots(figsize=(5, 4.2))
-                            ax_m.pie(sub_by_tag['Sub (本週)'], labels=sub_by_tag['方案類型'], autopct='%1.1f%%', startangle=140)
-                            ax_m.axis('equal')
-                            st.pyplot(fig_m)
+                            st.info(f"選定區間內無 {metric_key} 相關數據。")
+                            
+                st.markdown("---")
+                st.subheader(f"🍰 最新週別 ({latest_date_str}) Sub 會員數方案類型佔比")
+                
+                df_latest_sub = df_filtered[(df_filtered['Date'] == latest_date_str) & (df_filtered['Metric'] == 'Sub')]
+                if not df_latest_sub.empty:
+                    sub_by_tag = df_latest_sub.groupby('方案類型')['Value'].sum().reset_index()
+                    sub_by_tag['Value'] = sub_by_tag['Value'].round(0).astype(int)
+                    
+                    if HAS_PLOTLY:
+                        fig_plotly = px.pie(
+                            sub_by_tag, 
+                            names='方案類型', 
+                            values='Value',
+                            color_discrete_sequence=['#1DB954', '#4B9CD3', '#FF9F1C', '#E50914', '#9B59B6'],
+                            hole=0.3
+                        )
+                        fig_plotly.update_traces(textposition='inside', textinfo='percent+label')
+                        fig_plotly.update_layout(
+                            margin=dict(t=10, b=10, l=10, r=10),
+                            showlegend=True
+                        )
+                        st.plotly_chart(fig_plotly, use_container_width=True)
                     else:
-                        st.info("尚無 Sub 數據可繪製佔比圖。")
+                        fig_m, ax_m = plt.subplots(figsize=(5, 4.2))
+                        ax_m.pie(sub_by_tag['Value'], labels=sub_by_tag['方案類型'], autopct='%1.1f%%', startangle=140)
+                        ax_m.axis('equal')
+                        st.pyplot(fig_m)
 
     else:
         st.info("💡 請點選上方『⚙️ Raw Data 網址庫管理』分頁新增每週分頁網址。")
