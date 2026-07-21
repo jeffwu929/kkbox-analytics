@@ -6,7 +6,6 @@ import json
 import os
 from datetime import datetime
 
-# 嘗試載入 Plotly，若環境未安裝則降級使用 Matplotlib
 try:
     import plotly.express as px
     HAS_PLOTLY = True
@@ -296,16 +295,18 @@ with main_tab1:
                 matched_date_str = available_dates[0]
             st.sidebar.info(f"🎯 自動判別對應週別為：**{matched_date_str}**")
 
-        # 📅 2. 週別區間篩選
+        # 📅 2. 週別區間篩選 (增加「近 5 週」)
         st.sidebar.subheader("📅 2. 週別區間篩選")
-        quick_select = st.sidebar.selectbox("🚀 快速時間選擇：", ["自動連動指定日期", "近 4 週", "近 8 週", "近 12 週", "全選", "自訂"])
+        quick_select = st.sidebar.selectbox("🚀 快速時間選擇：", ["自動連動指定日期", "近 4 週", "近 5 週", "近 8 週", "近 12 週", "全選", "自訂"])
         
         if quick_select == "自動連動指定日期" and matched_date_str:
             idx = available_dates.index(matched_date_str) if matched_date_str in available_dates else len(available_dates)-1
-            start_idx = max(0, idx - 3)
+            start_idx = max(0, idx - 4) # 展示當週及前 4 週共 5 週
             default_selected = available_dates[start_idx:idx+1]
         elif quick_select == "近 4 週":
             default_selected = available_dates[-4:] if len(available_dates) >= 4 else available_dates
+        elif quick_select == "近 5 週":
+            default_selected = available_dates[-5:] if len(available_dates) >= 5 else available_dates
         elif quick_select == "近 8 週":
             default_selected = available_dates[-8:] if len(available_dates) >= 8 else available_dates
         elif quick_select == "近 12 週":
@@ -339,6 +340,9 @@ with main_tab1:
 
             sub_tab1, sub_tab2 = st.tabs(["📊 1. 會員數趨勢與目標比較", "🧩 2. 方案類型佔比分析"])
 
+            # ====================================================
+            # 兩大類之一：訂閱數變化
+            # ====================================================
             with sub_tab1:
                 st.subheader(f"📌 TWM 會員數比較指標 ({latest_date_str})")
                 
@@ -362,24 +366,24 @@ with main_tab1:
                 <table style="width:100%; border-collapse:collapse; text-align:center; font-size:16px;">
                     <thead>
                         <tr style="background-color:#f2f2f2; border-bottom:2px solid #ddd;">
-                            <th style="padding:10px;">指標項目</th>
-                            <th style="padding:10px;">本週</th>
-                            <th style="padding:10px;">上週</th>
-                            <th style="padding:10px;">WOW 增減</th>
-                            <th style="padding:10px;">{latest_dt.month}月目標</th>
-                            <th style="padding:10px;">與目標落差</th>
-                            <th style="padding:10px;">達成率</th>
+                            <th style="padding:10px; text-align:center;">指標項目</th>
+                            <th style="padding:10px; text-align:center;">本週</th>
+                            <th style="padding:10px; text-align:center;">上週</th>
+                            <th style="padding:10px; text-align:center;">WOW 增減</th>
+                            <th style="padding:10px; text-align:center;">{latest_dt.month}月目標</th>
+                            <th style="padding:10px; text-align:center;">與目標落差</th>
+                            <th style="padding:10px; text-align:center;">達成率</th>
                         </tr>
                     </thead>
                     <tbody>
                         <tr style="border-bottom:1px solid #ddd;">
-                            <td style="padding:12px; font-weight:bold;">TWM 會員數 (Sub)</td>
-                            <td style="padding:12px; font-weight:bold;">{int(round(latest_val)):,}</td>
-                            <td style="padding:12px;">{f"{int(round(prev_val)):,}" if prev_val else "N/A"}</td>
-                            <td style="padding:12px;">{wow_html}</td>
-                            <td style="padding:12px;">{f"{target_val:,}" if target_val > 0 else "未設定"}</td>
-                            <td style="padding:12px;">{diff_html}</td>
-                            <td style="padding:12px;">{achieve_html}</td>
+                            <td style="padding:12px; font-weight:bold; text-align:center;">TWM 會員數 (Sub)</td>
+                            <td style="padding:12px; font-weight:bold; text-align:center;">{int(round(latest_val)):,}</td>
+                            <td style="padding:12px; text-align:center;">{f"{int(round(prev_val)):,}" if prev_val else "N/A"}</td>
+                            <td style="padding:12px; text-align:center;">{wow_html}</td>
+                            <td style="padding:12px; text-align:center;">{f"{target_val:,}" if target_val > 0 else "未設定"}</td>
+                            <td style="padding:12px; text-align:center;">{diff_html}</td>
+                            <td style="padding:12px; text-align:center;">{achieve_html}</td>
                         </tr>
                     </tbody>
                 </table>
@@ -409,54 +413,59 @@ with main_tab1:
                 else:
                     formatted_pivot = pivot_df.applymap(lambda x: f"{x:,}")
                     
-                st.dataframe(formatted_pivot, use_container_width=True)
+                # 數字與標頭全面置中
+                st.dataframe(formatted_pivot.style.set_properties(**{'text-align': 'center'}), use_container_width=True)
 
+            # ====================================================
+            # 兩大類之二：方案類型佔比分析 (含跨週動態比較欄位)
+            # ====================================================
             with sub_tab2:
-                st.subheader(f"🧩 方案類型佔比分析 ({latest_date_str})")
-                st.caption("💡 針對最新週別，依據您的自訂方案類型彙總 Sub、Conversion、Churn、Switch-in、Switch-out 關鍵營運指標：")
+                base_date_str = selected_dates[0] # 選取區間的起始對照週
                 
+                st.subheader(f"🧩 方案類型佔比分析 (本週: {latest_date_str} vs 對照週: {base_date_str})")
+                st.caption(f"💡 本區塊自動對比您選取的【{len(selected_dates)} 週時間區間】內，最新週與對照週（{base_date_str}）的 Conversion、Churn、Switch in/out 指標增減變化：")
+                
+                # 計算最新週與對照週的各 Tag 彙總數據
                 df_latest_all = df_filtered[df_filtered['Date'] == latest_date_str]
+                df_base_all = df_filtered[df_filtered['Date'] == base_date_str]
                 
-                tag_composition = df_latest_all.pivot_table(
-                    index='方案類型', 
-                    columns='Metric', 
-                    values='Value', 
-                    aggfunc='sum', 
-                    fill_value=0
-                )
+                tag_latest = df_latest_all.pivot_table(index='方案類型', columns='Metric', values='Value', aggfunc='sum', fill_value=0)
+                tag_base = df_base_all.pivot_table(index='方案類型', columns='Metric', values='Value', aggfunc='sum', fill_value=0)
                 
-                required_metrics = ['Sub', 'Conversion', 'Churn', 'Switch in', 'Switch out']
-                for m in required_metrics:
-                    if m not in tag_composition.columns:
-                        tag_composition[m] = 0
-                        
-                tag_composition = tag_composition[required_metrics].rename(columns={
-                    'Switch in': 'Switch-in',
-                    'Switch out': 'Switch-out'
-                })
+                metrics_list = ['Sub', 'Conversion', 'Churn', 'Switch in', 'Switch out']
+                for m in metrics_list:
+                    if m not in tag_latest.columns: tag_latest[m] = 0
+                    if m not in tag_base.columns: tag_base[m] = 0
                 
-                tag_composition = tag_composition.round(0).astype(int)
+                comp_display = pd.DataFrame(index=tag_latest.index)
+                comp_display['Sub (本週)'] = tag_latest['Sub'].round(0).astype(int)
                 
+                # 動態加入各指標的本週數值與對照增減
+                for m_name, m_key in [('Conversion', 'Conversion'), ('Churn', 'Churn'), ('Switch-in', 'Switch in'), ('Switch-out', 'Switch out')]:
+                    l_v = tag_latest[m_key]
+                    b_v = tag_base[m_key]
+                    diff_v = l_v - b_v
+                    
+                    comp_display[f'{m_name} (本週)'] = l_v.round(0).astype(int).apply(lambda x: f"{x:,}")
+                    comp_display[f'{m_name} 較對照週增減'] = diff_v.round(0).astype(int).apply(lambda x: f"{'+' if x>0 else ''}{x:,}")
+
                 col_comp1, col_comp2 = st.columns([3, 2])
                 
                 with col_comp1:
-                    st.write("**📋 方案類型指標總覽表：**")
-                    if hasattr(tag_composition, 'map'):
-                        formatted_comp = tag_composition.map(lambda x: f"{x:,}")
-                    else:
-                        formatted_comp = tag_composition.applymap(lambda x: f"{x:,}")
-                    st.dataframe(formatted_comp, use_container_width=True)
+                    st.write("**📋 方案類型指標與跨週比較總覽表：**")
+                    # 數字與標頭全面置中
+                    st.dataframe(comp_display.style.set_properties(**{'text-align': 'center'}), use_container_width=True)
                     
                 with col_comp2:
                     st.write("**🍰 Sub 會員數方案類型佔比：**")
-                    if 'Sub' in tag_composition.columns and tag_composition['Sub'].sum() > 0:
-                        sub_by_tag = tag_composition['Sub'].reset_index()
+                    if 'Sub (本週)' in comp_display.columns and comp_display['Sub (本週)'].sum() > 0:
+                        sub_by_tag = comp_display['Sub (本週)'].reset_index()
                         
                         if HAS_PLOTLY:
                             fig_plotly = px.pie(
                                 sub_by_tag, 
                                 names='方案類型', 
-                                values='Sub',
+                                values='Sub (本週)',
                                 color_discrete_sequence=['#1DB954', '#4B9CD3', '#FF9F1C', '#E50914', '#9B59B6'],
                                 hole=0.3
                             )
@@ -468,7 +477,7 @@ with main_tab1:
                             st.plotly_chart(fig_plotly, use_container_width=True)
                         else:
                             fig_m, ax_m = plt.subplots(figsize=(5, 4.2))
-                            ax_m.pie(sub_by_tag['Sub'], labels=sub_by_tag['方案類型'], autopct='%1.1f%%', startangle=140)
+                            ax_m.pie(sub_by_tag['Sub (本週)'], labels=sub_by_tag['方案類型'], autopct='%1.1f%%', startangle=140)
                             ax_m.axis('equal')
                             st.pyplot(fig_m)
                     else:
