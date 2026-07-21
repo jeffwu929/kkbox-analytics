@@ -189,7 +189,7 @@ with main_tab3:
                 st.rerun()
 
 # ==========================================
-# 🔄 數據讀取邏輯 (全覆蓋正則防漏抓)
+# 🔄 數據讀取邏輯
 # ==========================================
 @st.cache_data(ttl=60)
 def load_all_saved_urls(url_map):
@@ -222,7 +222,6 @@ def load_all_saved_urls(url_map):
                     
                 metric_val = str(metrics[col_idx])
                 
-                # 🚨 精準強效比對：防止 Churn/Conversion 等文字包在 Tableau 複雜抬頭中漏抓
                 if 'Churn' in metric_val or 'churn' in metric_val: metric_clean = 'Churn'
                 elif 'Conversion' in metric_val or 'conversion' in metric_val: metric_clean = 'Conversion'
                 elif 'Switch in' in metric_val or 'Switch-in' in metric_val: metric_clean = 'Switch in'
@@ -263,12 +262,11 @@ def load_all_saved_urls(url_map):
 
 df_clean, loaded_count = load_all_saved_urls(st.session_state['url_db'])
 
-# 渲染兼具【自動 Total 列】與【完美置中】的 HTML 表格產生器
+# 渲染兼具【自動 Total 列】與【完美置中】的 HTML 表格產生器 (修復 HTML 標籤語法)
 def render_custom_html_table(df_pivot, first_col_name="Date"):
     df_pivot = df_pivot.round(0).astype(int)
     cols = list(df_pivot.columns)
     
-    # 計算各欄總和 (Total)
     total_series = df_pivot.sum(axis=0)
     
     html = '<div class="custom-table-container"><table class="custom-table"><thead><tr>'
@@ -285,7 +283,6 @@ def render_custom_html_table(df_pivot, first_col_name="Date"):
             html += f'<td>{val:,}</td>'
         html += '</tr>'
         
-    # 加入 Total 最底部總和列
     html += '<tr class="total-row">'
     html += '<td>Total</td>'
     for col in cols:
@@ -293,7 +290,7 @@ def render_custom_html_table(df_pivot, first_col_name="Date"):
         html += f'<td>{t_val:,}</td>'
     html += '</tr>'
     
-    html += 'tbody></table></div>'
+    html += '</tbody></table></div>'
     return html
 
 # ==========================================
@@ -479,7 +476,7 @@ with main_tab1:
                 st.dataframe(pivot_df.style.set_properties(**{'text-align': 'center'}), use_container_width=True)
 
             # ====================================================
-            # 兩大類之二：方案類型佔比分析 (完美剔除空行 + 底部 Total)
+            # 兩大類之二：方案類型佔比分析
             # ====================================================
             with sub_tab2:
                 st.subheader("🧩 各方案類型營運指標跨週趨勢分析")
@@ -503,7 +500,7 @@ with main_tab1:
                         if not df_metric.empty:
                             m_pivot = df_metric.pivot_table(index='方案類型', columns='Date', values='Value', aggfunc='sum', fill_value=0)
                             
-                            # 渲染乾淨、剔除空行、帶有 Total 的置中 HTML 表格
+                            # 渲染無瑕疵、置中的 HTML 表格
                             table_html = render_custom_html_table(m_pivot, first_col_name="Date")
                             st.markdown(table_html, unsafe_allow_html=True)
                         else:
