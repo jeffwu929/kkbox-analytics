@@ -1,20 +1,19 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-import gdown
-import os
-import glob
-import shutil
+import requests
+import io
+import re
 
 st.set_page_config(page_title="KKBOX 會員數據自動化分析系統", layout="wide", page_icon="📊")
 
 # ==========================================
-# 🔑 1. 正確的 Google Drive 資料夾 ID
+# 🔑 1. 鎖定固定的 Google Drive 資料夾 ID
 # ==========================================
 FIXED_DRIVE_FOLDER_ID = "1YjLkuX_BuEeWvsWTuH_kT7Wmei7edFO_"
 
 # ==========================================
-# 🏷️ 2. 100% 官方內建對照字典 (已完整綁定 package_tags.xlsx)
+# 🏷️ 2. 100% 官方內建對照字典
 # ==========================================
 OFFICIAL_TAG_MAP = {
     '[台哥大方案] 無損音質 24M優惠$209': '搭售',
@@ -40,72 +39,67 @@ if 'tag_map' not in st.session_state:
     st.session_state['tag_map'] = OFFICIAL_TAG_MAP.copy()
 
 st.title("📊 KKBOX 會員數據自動化分析系統 (週視角)")
-st.caption("🚀 已連動固定雲端資料庫，自動讀取最新週別 Raw Data！")
+st.caption("🚀 自動讀取 Google Drive Raw Data！")
 st.markdown("---")
 
 # ==========================================
-# 🔄 3. 自動從 Google Drive 下載與解析檔案
+# 🔄 3. 直連 Google Drive 下載與解析
 # ==========================================
 @st.cache_data(ttl=1800)
-def load_data_from_drive(folder_id):
-    parsed_rows = []
-    download_dir = "./drive_raw_data"
-    
-    if os.path.exists(download_dir):
-        try:
-            shutil.rmtree(download_dir)
-        except Exception:
-            pass
-    os.makedirs(download_dir, exist_ok=True)
-    
+def fetch_data_from_drive_folder(folder_id):
+    # 抓取 Drive 資料夾公開網頁內容
+    folder_url = f"https://drive.google.com/embeddedfolderview?id={folder_id}#list"
     try:
-        url = f"https://drive.google.com/drive/folders/{folder_id}"
-        gdown.download_folder(url, output=download_dir, quiet=True, use_cookies=False)
-    except Exception as e:
-        pass
+        response = requests.get(folder_url)
+        # 尋找資料夾中的所有檔案 ID
+        file_ids = re.findall(r'id=([a-zA-Z0-9_-]{25,})', response.text)
+        file_ids = list(set(file_ids))  # 去重
+    except Exception:
+        file_ids = []
 
-    excel_files = glob.glob(f"{download_dir}/*.xlsx") + glob.glob(f"{download_dir}/*.xls") + glob.glob(f"{download_dir}/*/*.xlsx") + glob.glob(f"{download_dir}/*/*.xls")
+    parsed_rows = []
     
-    if not excel_files:
-        st.warning("⚠️ 雲端資料夾暫無檔案，或下載受阻。請確認資料夾內有 Excel 檔並開啟『知道連結者皆可檢視』。")
-        return pd.DataFrame()
-
-    for file_path in excel_files:
+    for fid in file_ids:
+        # 使用直連下載網址
+        download_url = f"https://drive.google.com/uc?export=download&id={fid}"
         try:
-            df_raw = pd.read_excel(file_path, header=None)
-            dates = df_raw.iloc[0].ffill()
-            metrics = df_raw.iloc[1]
-            
-            df_data = df_raw.iloc[2:].copy()
-            df_data[0] = df_data[0].ffill()
-            df_data = df_data.rename(columns={0: 'Package_Name'})
-            
-            for col_idx in range(3, df_data.shape[1]):
-                date_str = str(dates[col_idx]).split(' ')[0]
-                try:
-                    date_val = pd.to_datetime(date_str).strftime('%Y/%m/%d')
-                except:
-                    continue
-                    
-                metric_val = str(metrics[col_idx])
-                if 'Churn' in metric_val: metric_clean = 'Churn'
-                elif 'Conversion' in metric_val: metric_clean = 'Conversion'
-                elif 'Switch in' in metric_val: metric_clean = 'Switch in'
-                elif 'Switch out' in metric_val: metric_clean = 'Switch out'
-                elif 'Net' in metric_val: metric_clean = 'Net'
-                elif 'Sub' in metric_val: metric_clean = 'Sub'
-                else: continue
-                    
-                for _, row in df_data.iterrows():
-                    pkg = str(row['Package_Name']).strip()
-                    val = row[col_idx]
-                    if pd.notna(val) and pkg != '總和':
-                        parsed_rows.append({
-                            'Date': date_val,
-                            'Package_Name': pkg,
-                            'Metric': metric_clean,
-                            'Value': float(val)
-                        })
+            res = requests.get(download_url)
+            # 判斷是否為 Excel 檔
+            if res.status_code == 200 and len(res.content) > 1000:
+                df_raw = pd.read_excel(io.BytesIO(res.content), header=None)
+                dates = df_raw.iloc[0].ffill()
+                metrics = df_raw.iloc[1]
+                
+                df_data = df_raw.iloc[2:].copy()
+                df_data[0] = df_data[0].ffill()
+                df_data = df_data.rename(columns={0: 'Package_Name'})
+                
+                for col_idx in range(3, df_data.shape[1]):
+                    date_str = str(dates[col_idx]).split(' ')[0]
+                    try:
+                        date_val = pd.to_datetime(date_str).strftime('%Y/%m/%d')
+                    except:
+                        continue
+                        
+                    metric_val = str(metrics[col_idx])
+                    if 'Churn' in metric_val: metric_clean = 'Churn'
+                    elif 'Conversion' in metric_val: metric_clean = 'Conversion'
+                    elif 'Switch in' in metric_val: metric_clean = 'Switch in'
+                    elif 'Switch out' in metric_val: metric_clean = 'Switch out'
+                    elif 'Net' in metric_val: metric_clean = 'Net'
+                    elif 'Sub' in metric_val: metric_clean = 'Sub'
+                    else: continue
+                        
+                    for _, row in df_data.iterrows():
+                        pkg = str(row['Package_Name']).strip()
+                        val = row[col_idx]
+                        if pd.notna(val) and pkg != '總和':
+                            parsed_rows.append({
+                                'Date': date_val,
+                                'Package_Name': pkg,
+                                'Metric': metric_clean,
+                                'Value': float(val)
+                            })
         except Exception:
             continue
 
@@ -114,16 +108,17 @@ def load_data_from_drive(folder_id):
         df_clean = df_all.groupby(['Date', 'Package_Name', 'Metric'], as_index=False)['Value'].max()
         df_clean['Date_dt'] = pd.to_datetime(df_clean['Date'])
         return df_clean.sort_values('Date_dt')
+        
     return pd.DataFrame()
 
-# 側邊欄重新整理按鈕
+# 側邊欄按鈕
 if st.sidebar.button("🔄 手動同步最新 Drive 資料"):
     st.cache_data.clear()
     st.rerun()
 
-# 備用手動上傳區
+# 備用上傳入口
 st.sidebar.markdown("---")
-uploaded_backup = st.sidebar.file_uploader("📂 (備用) 上傳每週 Raw Data Excel", type=["xlsx", "xls"], accept_multiple_files=True)
+uploaded_backup = st.sidebar.file_uploader("📂 (備用) 手動上傳每週 Raw Data", type=["xlsx", "xls"], accept_multiple_files=True)
 
 df_clean = pd.DataFrame()
 if uploaded_backup:
@@ -158,8 +153,8 @@ if uploaded_backup:
         df_clean['Date_dt'] = pd.to_datetime(df_clean['Date'])
         df_clean = df_clean.sort_values('Date_dt')
 else:
-    with st.spinner("⏳ 正在與 Google Drive 資料庫同步最新數據..."):
-        df_clean = load_data_from_drive(FIXED_DRIVE_FOLDER_ID)
+    with st.spinner("⏳ 正自動同步 Google Drive 數據..."):
+        df_clean = fetch_data_from_drive_folder(FIXED_DRIVE_FOLDER_ID)
 
 if not df_clean.empty:
     def get_official_tag(pkg):
@@ -215,4 +210,4 @@ if not df_clean.empty:
             pivot_df = df_sub.pivot_table(index=['Tag', 'Package_Name'], columns='Date', values='Value', aggfunc='sum', fill_value=0)
             st.dataframe(pivot_df, use_container_width=True)
 else:
-    st.info("💡 尚未載入資料。您可以點擊左側『🔄 手動同步最新 Drive 資料』，或直接使用左側備用上傳功能進行即時分析。")
+    st.info("💡 尚未讀取到資料。請點擊左側『🔄 手動同步最新 Drive 資料』，或使用備用上傳功能。")
