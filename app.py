@@ -112,29 +112,44 @@ with main_tab2:
                 st.rerun()
 
 # ==========================================
-# 🎯 分頁三：月度目標維護
+# 🎯 分頁三：月度目標維護 (含新增/編輯與刪除)
 # ==========================================
 with main_tab3:
-    st.subheader("🎯 各月份 TWM 會員數目標設定")
-    st.info("💡 設定各月份目標值，系統會根據當前檢視最新週別自動計算目標落差與達成率。")
+    st.subheader("🎯 各月份 TWM 會員數目標維護")
+    st.info("💡 輸入月份與目標值點擊儲存，若月份已存在將自動覆蓋更新。")
     
     col_t1, col_t2, col_t3 = st.columns([2, 3, 1])
     target_month = col_t1.text_input("月份 (例如: 2026/07)", placeholder="YYYY/MM")
     target_val = col_t2.number_input("該月目標會員數 (Sub)", min_value=0, step=1000, value=120000)
     
     st.write("")
-    if col_t3.button("💾 儲存月目標"):
+    if col_t3.button("💾 儲存 / 更新月目標"):
         if target_month and target_val > 0:
             st.session_state['target_db'][target_month.strip()] = int(target_val)
             save_json_file(TARGETS_FILE, st.session_state['target_db'])
             st.success(f"✅ 已成功儲存 {target_month} 目標為 {int(target_val):,}！")
             st.rerun()
+        else:
+            st.warning("⚠️ 請輸入正確的月份與目標數值。")
 
     st.markdown("---")
     st.write("📋 **目前月度目標設定一覽：**")
     if st.session_state['target_db']:
         t_df = [{"月份": m, "目標會員數": f"{v:,}"} for m, v in st.session_state['target_db'].items()]
         st.dataframe(pd.DataFrame(t_df), use_container_width=True)
+        
+        # 🗑️ 新增刪除月度目標功能
+        st.markdown("---")
+        col_tdel1, col_tdel2 = st.columns([3, 1])
+        del_m_target = col_tdel1.selectbox("選擇要刪除的月份目標：", list(st.session_state['target_db'].keys()))
+        if col_tdel2.button("🗑️ 刪除該月目標"):
+            if del_m_target in st.session_state['target_db']:
+                del st.session_state['target_db'][del_m_target]
+                save_json_file(TARGETS_FILE, st.session_state['target_db'])
+                st.success(f"已刪除『{del_m_target}』的目標設定！")
+                st.rerun()
+    else:
+        st.write("目前尚無任何月度目標設定。")
 
 # ==========================================
 # 🔄 數據讀取與處理邏輯
@@ -322,7 +337,6 @@ with main_tab1:
             pivot_df = df_sub.pivot_table(index=['Tag', 'Package_Name'], columns='Date', values='Value', aggfunc='sum', fill_value=0)
             pivot_df = pivot_df.round(0).astype(int)
             
-            # 🚨 相容最新 Pandas 版本的格式化寫法
             if hasattr(pivot_df, 'map'):
                 formatted_pivot = pivot_df.map(lambda x: f"{x:,}")
             else:
