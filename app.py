@@ -1,10 +1,15 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
+import matplotlib
 import re
 import json
 import os
 from datetime import datetime
+
+# 解決 Matplotlib 中文字體亂碼/跑掉的問題
+plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'SimHei', 'Arial Unicode MS', 'DejaVu Sans']
+plt.rcParams['axes.unicode_minus'] = False
 
 st.set_page_config(page_title="KKBOX 會員數據自動化分析系統", layout="wide", page_icon="📊")
 
@@ -72,14 +77,14 @@ if 'tag_map' not in st.session_state:
     st.session_state['tag_map'] = load_json_file(TAGS_FILE, OFFICIAL_TAG_MAP)
 
 st.title("📊 KKBOX 會員數據自動化分析系統")
-st.caption("🚀 全方位自動化儀表板：整合 TWM 會員數比較表、 Tag 方案組成、歷史趨勢圖與方案透視表！")
+st.caption("🚀 全方位自動化儀表板：整合 TWM 會員數比較表、方案類型佔比分析、歷史趨勢圖與透視表！")
 st.markdown("---")
 
 main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
     "📈 數據分析儀表板", 
     "⚙️ Raw Data 網址庫管理", 
     "🎯 月度目標維護",
-    "🏷️ 方案標籤維護"
+    "🏷️ 方案類型維護"
 ])
 
 # ==========================================
@@ -221,11 +226,11 @@ def load_all_saved_urls(url_map):
 df_clean, loaded_count = load_all_saved_urls(st.session_state['url_db'])
 
 # ==========================================
-# 🏷️ 分頁四：方案標籤獨立維護
+# 🏷️ 分頁四：方案類型獨立維護
 # ==========================================
 with main_tab4:
-    st.subheader("🏷️ 方案對照標籤管理 (Tag Manager)")
-    st.info("💡 系統已為您自動彙總目前資料庫中出現過的所有方案。您可在下方直接編輯或修改各方案的 Tag 分類。")
+    st.subheader("🏷️ 方案類型對照管理")
+    st.info("💡 系統已為您自動彙總目前資料庫中出現過的所有方案。您可在下方直接編輯或修改各方案對應的「方案類型」。")
     
     if not df_clean.empty:
         all_detected_pkgs = sorted(df_clean['Package_Name'].unique().tolist())
@@ -234,22 +239,22 @@ with main_tab4:
         for pkg in all_detected_pkgs:
             tag_list_data.append({
                 "方案名稱": pkg,
-                "目前對照 Tag": st.session_state['tag_map'].get(pkg, "🚨 未分類新方案")
+                "對應方案類型": st.session_state['tag_map'].get(pkg, "🚨 未分類新方案")
             })
             
         st.dataframe(pd.DataFrame(tag_list_data), use_container_width=True)
         st.markdown("---")
         
-        st.write("✏️ **編輯方案 Tag：**")
+        st.write("✏️ **編輯方案類型：**")
         col_tag1, col_tag2, col_tag3 = st.columns([3, 2, 1])
         selected_pkg = col_tag1.selectbox("選擇要設定的方案：", all_detected_pkgs)
-        assign_tag = col_tag2.selectbox("指定 Tag 分類：", ["搭售", "無約", "搭贈", "其他"])
+        assign_tag = col_tag2.selectbox("指定方案類型：", ["搭售", "無約", "搭贈", "其他"])
         
         st.write("")
-        if col_tag3.button("💾 儲存標籤設定"):
+        if col_tag3.button("💾 儲存方案類型"):
             st.session_state['tag_map'][selected_pkg] = assign_tag
             save_json_file(TAGS_FILE, st.session_state['tag_map'])
-            st.success(f"✅ 已成功將「{selected_pkg}」設定為 [{assign_tag}]！")
+            st.success(f"✅ 已成功將「{selected_pkg}」歸類為 [{assign_tag}]！")
             st.rerun()
     else:
         st.write("尚無讀取到方案數據，請先載入每週 Raw Data。")
@@ -268,7 +273,7 @@ with main_tab1:
         def get_official_tag(pkg):
             return st.session_state['tag_map'].get(pkg, '🚨 未分類新方案')
 
-        df_clean['Tag'] = df_clean['Package_Name'].apply(get_official_tag)
+        df_clean['方案類型'] = df_clean['Package_Name'].apply(get_official_tag)
         
         available_dates = df_clean['Date'].unique().tolist()
         available_dts = [pd.to_datetime(d) for d in available_dates]
@@ -382,24 +387,21 @@ with main_tab1:
             st.markdown("---")
 
             # ----------------------------------------------------
-            # 🧩 2️⃣ 方案組成區塊 (以 Tag 分類：Sub, Conversion, Churn, Switch-in, Switch-out)
+            # 🧩 2️⃣ 方案類型佔比 (Sub, Conversion, Churn, Switch-in, Switch-out)
             # ----------------------------------------------------
-            st.subheader(f"🧩 方案組成分析 ({latest_date_str})")
-            st.caption("💡 針對最新週別，依據您的自訂 Tag 分類彙總各項關鍵營運指標：")
+            st.subheader(f"🧩 方案類型佔比 ({latest_date_str})")
+            st.caption("💡 針對最新週別，依據您的自訂方案類型彙總各項關鍵營運指標：")
             
-            # 篩選最新週別的所有指標數據
             df_latest_all = df_filtered[df_filtered['Date'] == latest_date_str]
             
-            # 透視依 Tag 與 Metric 加總
             tag_composition = df_latest_all.pivot_table(
-                index='Tag', 
+                index='方案類型', 
                 columns='Metric', 
                 values='Value', 
                 aggfunc='sum', 
                 fill_value=0
             )
             
-            # 確保 5 大關鍵欄位都在 table 中
             required_metrics = ['Sub', 'Conversion', 'Churn', 'Switch in', 'Switch out']
             for m in required_metrics:
                 if m not in tag_composition.columns:
@@ -415,7 +417,7 @@ with main_tab1:
             col_comp1, col_comp2 = st.columns([3, 2])
             
             with col_comp1:
-                st.write("**📋 Tag 分類指標總覽表：**")
+                st.write("**📋 方案類型指標總覽表：**")
                 if hasattr(tag_composition, 'map'):
                     formatted_comp = tag_composition.map(lambda x: f"{x:,}")
                 else:
@@ -423,21 +425,32 @@ with main_tab1:
                 st.dataframe(formatted_comp, use_container_width=True)
                 
             with col_comp2:
-                st.write("**🍰 Sub 會員數 Tag 組成占比：**")
+                st.write("**🍰 Sub 會員數方案類型佔比：**")
                 if 'Sub' in tag_composition.columns and tag_composition['Sub'].sum() > 0:
                     sub_by_tag = tag_composition['Sub']
                     fig_pie, ax_pie = plt.subplots(figsize=(5, 4.2))
-                    ax_pie.pie(
+                    
+                    # 繪製圓餅圖，顯式指定中文字體
+                    wedges, texts, autotexts = ax_pie.pie(
                         sub_by_tag, 
                         labels=sub_by_tag.index, 
                         autopct='%1.1f%%', 
                         startangle=140, 
                         colors=['#1DB954', '#4B9CD3', '#FF9F1C', '#E50914', '#9B59B6']
                     )
+                    
+                    # 設定圓餅圖字體樣式
+                    for t in texts:
+                        t.set_fontproperties('Microsoft JhengHei')
+                        t.set_fontsize(11)
+                    for at in autotexts:
+                        at.set_fontsize(10)
+                        at.set_weight('bold')
+                        
                     ax_pie.axis('equal')
                     st.pyplot(fig_pie)
                 else:
-                    st.info("尚無 Sub 數據可繪製占比圖。")
+                    st.info("尚無 Sub 數據可繪製佔比圖。")
                     
             st.markdown("---")
 
@@ -458,10 +471,10 @@ with main_tab1:
             st.markdown("---")
 
             # ----------------------------------------------------
-            # 4️⃣ 各貼標與方案會員數 (Sub) 跨週透視表
+            # 4️⃣ 各方案類型會員數 (Sub) 跨週透視表
             # ----------------------------------------------------
-            st.subheader("📋 各貼標與方案會員數 (Sub) 跨週透視表")
-            pivot_df = df_sub.pivot_table(index=['Tag', 'Package_Name'], columns='Date', values='Value', aggfunc='sum', fill_value=0)
+            st.subheader("📋 各方案類型會員數 (Sub) 跨週透視表")
+            pivot_df = df_sub.pivot_table(index=['方案類型', 'Package_Name'], columns='Date', values='Value', aggfunc='sum', fill_value=0)
             pivot_df = pivot_df.round(0).astype(int)
             
             if hasattr(pivot_df, 'map'):
