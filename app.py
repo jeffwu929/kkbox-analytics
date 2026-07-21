@@ -72,7 +72,7 @@ if 'tag_map' not in st.session_state:
     st.session_state['tag_map'] = load_json_file(TAGS_FILE, OFFICIAL_TAG_MAP)
 
 st.title("📊 KKBOX 會員數據自動化分析系統")
-st.caption("🚀 全方位自動化儀表板：動態顏色指標、日期自動判別週別、與方案標籤自主維護！")
+st.caption("🚀 全方位自動化儀表板：整合 TWM 會員數比較表、 Tag 方案組成、歷史趨勢圖與方案透視表！")
 st.markdown("---")
 
 main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
@@ -273,7 +273,7 @@ with main_tab1:
         available_dates = df_clean['Date'].unique().tolist()
         available_dts = [pd.to_datetime(d) for d in available_dates]
         
-        # 📅 1. 日期選擇器（自動判別週別）
+        # 📅 1. 日期選擇器
         st.sidebar.markdown("---")
         st.sidebar.subheader("📅 1. 指定日期自動判別週別")
         selected_date_input = st.sidebar.date_input("選擇任意日期：", datetime.now().date())
@@ -281,21 +281,19 @@ with main_tab1:
         matched_date_str = None
         if selected_date_input:
             input_dt = pd.to_datetime(selected_date_input)
-            # 尋找與輸入日期最接近且 <= 輸入日期的週別
             valid_dts = [d for d in available_dts if d <= input_dt]
             if valid_dts:
                 closest_dt = max(valid_dts)
                 matched_date_str = closest_dt.strftime('%Y/%m/%d')
             else:
-                matched_date_str = available_dates[0] # 若早於最舊日期，取最舊週別
+                matched_date_str = available_dates[0]
             st.sidebar.info(f"🎯 自動判別對應週別為：**{matched_date_str}**")
 
-        # 📅 2. 週別區間快速選單功能
+        # 📅 2. 週別區間篩選
         st.sidebar.subheader("📅 2. 週別區間篩選")
         quick_select = st.sidebar.selectbox("🚀 快速時間選擇：", ["自動連動指定日期", "近 4 週", "近 8 週", "近 12 週", "全選", "自訂"])
         
         if quick_select == "自動連動指定日期" and matched_date_str:
-            # 包含對應週別及之前 3 週
             idx = available_dates.index(matched_date_str) if matched_date_str in available_dates else len(available_dates)-1
             start_idx = max(0, idx - 3)
             default_selected = available_dates[start_idx:idx+1]
@@ -333,18 +331,16 @@ with main_tab1:
             achievement_rate = (latest_val / target_val * 100) if target_val > 0 else 0.0
 
             # ----------------------------------------------------
-            # 1️⃣ TWM 會員數指標比較表 (含綠/紅動態顏色)
+            # 1️⃣ TWM 會員數指標比較表
             # ----------------------------------------------------
             st.subheader(f"📌 TWM 會員數比較指標 ({latest_date_str})")
             
-            # WOW HTML 顏色處理
             if prev_val:
-                wow_color = "#1DB954" if wow_val >= 0 else "#E50914" # 綠色 / 紅色
+                wow_color = "#1DB954" if wow_val >= 0 else "#E50914"
                 wow_html = f"<span style='color:{wow_color}; font-weight:bold;'>{'+' if wow_val > 0 else ''}{int(round(wow_val)):,} ({wow_pct:+.2f}%)</span>"
             else:
                 wow_html = "N/A"
                 
-            # 與目標落差 HTML 顏色處理
             if target_val > 0:
                 diff_color = "#1DB954" if diff_target >= 0 else "#E50914"
                 diff_html = f"<span style='color:{diff_color}; font-weight:bold;'>{'+' if diff_target > 0 else ''}{int(round(diff_target)):,}</span>"
@@ -386,7 +382,67 @@ with main_tab1:
             st.markdown("---")
 
             # ----------------------------------------------------
-            # 2️⃣ Total Sub 跨週趨勢圖
+            # 🧩 2️⃣ 方案組成區塊 (以 Tag 分類：Sub, Conversion, Churn, Switch-in, Switch-out)
+            # ----------------------------------------------------
+            st.subheader(f"🧩 方案組成分析 ({latest_date_str})")
+            st.caption("💡 針對最新週別，依據您的自訂 Tag 分類彙總各項關鍵營運指標：")
+            
+            # 篩選最新週別的所有指標數據
+            df_latest_all = df_filtered[df_filtered['Date'] == latest_date_str]
+            
+            # 透視依 Tag 與 Metric 加總
+            tag_composition = df_latest_all.pivot_table(
+                index='Tag', 
+                columns='Metric', 
+                values='Value', 
+                aggfunc='sum', 
+                fill_value=0
+            )
+            
+            # 確保 5 大關鍵欄位都在 table 中
+            required_metrics = ['Sub', 'Conversion', 'Churn', 'Switch in', 'Switch out']
+            for m in required_metrics:
+                if m not in tag_composition.columns:
+                    tag_composition[m] = 0
+                    
+            tag_composition = tag_composition[required_metrics].rename(columns={
+                'Switch in': 'Switch-in',
+                'Switch out': 'Switch-out'
+            })
+            
+            tag_composition = tag_composition.round(0).astype(int)
+            
+            col_comp1, col_comp2 = st.columns([3, 2])
+            
+            with col_comp1:
+                st.write("**📋 Tag 分類指標總覽表：**")
+                if hasattr(tag_composition, 'map'):
+                    formatted_comp = tag_composition.map(lambda x: f"{x:,}")
+                else:
+                    formatted_comp = tag_composition.applymap(lambda x: f"{x:,}")
+                st.dataframe(formatted_comp, use_container_width=True)
+                
+            with col_comp2:
+                st.write("**🍰 Sub 會員數 Tag 組成占比：**")
+                if 'Sub' in tag_composition.columns and tag_composition['Sub'].sum() > 0:
+                    sub_by_tag = tag_composition['Sub']
+                    fig_pie, ax_pie = plt.subplots(figsize=(5, 4.2))
+                    ax_pie.pie(
+                        sub_by_tag, 
+                        labels=sub_by_tag.index, 
+                        autopct='%1.1f%%', 
+                        startangle=140, 
+                        colors=['#1DB954', '#4B9CD3', '#FF9F1C', '#E50914', '#9B59B6']
+                    )
+                    ax_pie.axis('equal')
+                    st.pyplot(fig_pie)
+                else:
+                    st.info("尚無 Sub 數據可繪製占比圖。")
+                    
+            st.markdown("---")
+
+            # ----------------------------------------------------
+            # 3️⃣ Total Sub 跨週趨勢圖
             # ----------------------------------------------------
             st.subheader("📈 Total Sub 跨週走勢圖")
             fig, ax = plt.subplots(figsize=(12, 4.2))
@@ -402,7 +458,7 @@ with main_tab1:
             st.markdown("---")
 
             # ----------------------------------------------------
-            # 3️⃣ 各貼標與方案會員數 (Sub) 跨週透視表
+            # 4️⃣ 各貼標與方案會員數 (Sub) 跨週透視表
             # ----------------------------------------------------
             st.subheader("📋 各貼標與方案會員數 (Sub) 跨週透視表")
             pivot_df = df_sub.pivot_table(index=['Tag', 'Package_Name'], columns='Date', values='Value', aggfunc='sum', fill_value=0)
