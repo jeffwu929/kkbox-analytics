@@ -11,7 +11,7 @@ st.set_page_config(page_title="KKBOX 會員數據自動化分析系統", layout=
 DEFAULT_SHEET_URL = "https://docs.google.com/spreadsheets/d/1rfEcF4gQn-o-8KQ-LVcFT9e4QrSJNzQJ/edit?gid=1647904491#gid=1647904491"
 
 # ==========================================
-# 🏷️ 2. 100% 官方內建對照字典 (完整綁定 package_tags)
+# 🏷️ 2. 100% 官方內建對照字典
 # ==========================================
 OFFICIAL_TAG_MAP = {
     '[台哥大方案] 無損音質 24M優惠$209': '搭售',
@@ -37,7 +37,7 @@ if 'tag_map' not in st.session_state:
     st.session_state['tag_map'] = OFFICIAL_TAG_MAP.copy()
 
 st.title("📊 KKBOX 會員數據自動化分析系統 (週視角)")
-st.caption("🚀 雲端試算表直連版：打開網頁即刻呈現最新分析結果！")
+st.caption("🚀 已校正彙總邏輯：自動精準計算各方案 Total Sub！")
 st.markdown("---")
 
 # ==========================================
@@ -62,7 +62,7 @@ def convert_to_csv_url(url):
     return url
 
 # ==========================================
-# 🔄 3. 自動讀取與解析
+# 🔄 3. 自動讀取與解析 (修正過濾彙總列)
 # ==========================================
 @st.cache_data(ttl=60)
 def load_data_from_url(url):
@@ -95,10 +95,17 @@ def load_data_from_url(url):
                 
             for _, row in df_data.iterrows():
                 pkg = str(row['Package_Name']).strip()
+                
+                # 🚨 關鍵修復：絕對剔除「總和」、「Total」或空白列，防止重複加總 double
+                if not pkg or '總和' in pkg or 'Total' in pkg or pkg == 'nan':
+                    continue
+                    
                 val = row[col_idx]
-                if pd.notna(val) and pkg != '總和':
+                if pd.notna(val):
                     try:
-                        val_num = float(val)
+                        # 處理千分位符號 (例如 "116,984" -> 116984.0)
+                        val_clean = str(val).replace(',', '').strip()
+                        val_num = float(val_clean)
                         parsed_rows.append({
                             'Date': date_val,
                             'Package_Name': pkg,
@@ -117,7 +124,7 @@ def load_data_from_url(url):
         st.error(f"❌ 讀取失敗。請確認試算表分享權限已開啟『知道連結者皆可檢視』。錯誤訊息：{e}")
     return pd.DataFrame()
 
-# 側邊欄強制重新整理按鈕
+# 側邊欄強制整理按鈕
 if st.sidebar.button("🔄 立即同步最新數據"):
     st.cache_data.clear()
     st.rerun()
