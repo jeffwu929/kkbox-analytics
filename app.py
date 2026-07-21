@@ -14,19 +14,37 @@ except ImportError:
 
 st.set_page_config(page_title="KKBOX 會員數據自動化分析系統", layout="wide", page_icon="📊")
 
-# 注入 CSS 樣式：強制全網頁的 Streamlit DataFrame / Table 儲存格全部文字置中
+# 注入 CSS 樣式：強制表格 100% 絕對置中，並加強標頭與 Total 列樣式
 st.markdown("""
     <style>
-    /* 強制所有表格內文與標題置中 */
-    [data-testid="stDataFrame"] div[data-testid="stTable"] div {
+    .custom-table-container {
+        display: flex;
+        justify-content: center;
+        width: 100%;
+        margin-bottom: 20px;
+    }
+    table.custom-table {
+        width: 100% !important;
+        border-collapse: collapse !important;
+        text-align: center !important;
+        font-size: 15px !important;
+    }
+    table.custom-table th {
+        background-color: #f2f2f2 !important;
+        padding: 10px !important;
+        border: 1px solid #ddd !important;
+        text-align: center !important;
+        font-weight: bold !important;
+    }
+    table.custom-table td {
+        padding: 10px !important;
+        border: 1px solid #ddd !important;
         text-align: center !important;
     }
-    .stDataFrame th, .stDataFrame td {
-        text-align: center !important;
-    }
-    div[data-testid="stTable"] table {
-        margin-left: auto;
-        margin-right: auto;
+    table.custom-table tr.total-row {
+        background-color: #f9f9f9 !important;
+        font-weight: bold !important;
+        border-top: 2px solid #333 !important;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -171,7 +189,7 @@ with main_tab3:
                 st.rerun()
 
 # ==========================================
-# 🔄 數據讀取邏輯
+# 🔄 數據讀取邏輯 (全覆蓋正則防漏抓)
 # ==========================================
 @st.cache_data(ttl=60)
 def load_all_saved_urls(url_map):
@@ -203,10 +221,12 @@ def load_all_saved_urls(url_map):
                 except: continue
                     
                 metric_val = str(metrics[col_idx])
-                if 'Churn' in metric_val: metric_clean = 'Churn'
-                elif 'Conversion' in metric_val: metric_clean = 'Conversion'
-                elif 'Switch in' in metric_val: metric_clean = 'Switch in'
-                elif 'Switch out' in metric_val: metric_clean = 'Switch out'
+                
+                # 🚨 精準強效比對：防止 Churn/Conversion 等文字包在 Tableau 複雜抬頭中漏抓
+                if 'Churn' in metric_val or 'churn' in metric_val: metric_clean = 'Churn'
+                elif 'Conversion' in metric_val or 'conversion' in metric_val: metric_clean = 'Conversion'
+                elif 'Switch in' in metric_val or 'Switch-in' in metric_val: metric_clean = 'Switch in'
+                elif 'Switch out' in metric_val or 'Switch-out' in metric_val: metric_clean = 'Switch out'
                 elif 'Net' in metric_val: metric_clean = 'Net'
                 elif 'Sub' in metric_val: metric_clean = 'Sub'
                 else: continue
@@ -242,6 +262,39 @@ def load_all_saved_urls(url_map):
     return pd.DataFrame(), 0
 
 df_clean, loaded_count = load_all_saved_urls(st.session_state['url_db'])
+
+# 渲染兼具【自動 Total 列】與【完美置中】的 HTML 表格產生器
+def render_custom_html_table(df_pivot, first_col_name="Date"):
+    df_pivot = df_pivot.round(0).astype(int)
+    cols = list(df_pivot.columns)
+    
+    # 計算各欄總和 (Total)
+    total_series = df_pivot.sum(axis=0)
+    
+    html = '<div class="custom-table-container"><table class="custom-table"><thead><tr>'
+    html += f'<th>{first_col_name}</th>'
+    for col in cols:
+        html += f'<th>{col}</th>'
+    html += '</tr></thead><tbody>'
+    
+    for idx_name, row in df_pivot.iterrows():
+        html += '<tr>'
+        html += f'<td style="font-weight:bold;">{idx_name}</td>'
+        for col in cols:
+            val = row[col]
+            html += f'<td>{val:,}</td>'
+        html += '</tr>'
+        
+    # 加入 Total 最底部總和列
+    html += '<tr class="total-row">'
+    html += '<td>Total</td>'
+    for col in cols:
+        t_val = total_series[col]
+        html += f'<td>{t_val:,}</td>'
+    html += '</tr>'
+    
+    html += 'tbody></table></div>'
+    return html
 
 # ==========================================
 # 🏷️ 分頁四：方案類型獨立維護
@@ -423,22 +476,14 @@ with main_tab1:
 
                 st.subheader("📋 各方案類型會員數 (Sub) 跨週透視表")
                 pivot_df = df_sub.pivot_table(index=['方案類型', 'Package_Name'], columns='Date', values='Value', aggfunc='sum', fill_value=0)
-                pivot_df = pivot_df.round(0).astype(int)
-                
-                if hasattr(pivot_df, 'map'):
-                    formatted_pivot = pivot_df.map(lambda x: f"{x:,}")
-                else:
-                    formatted_pivot = pivot_df.applymap(lambda x: f"{x:,}")
-                    
-                # 使用 HTML 渲染表格確保內文與標題100%絕對置中
-                st.write(formatted_pivot.to_html(classes='custom-table', justify='center'), unsafe_allow_html=True)
+                st.dataframe(pivot_df.style.set_properties(**{'text-align': 'center'}), use_container_width=True)
 
             # ====================================================
-            # 兩大類之二：方案類型佔比分析 (按 Conversion/Churn/Switch 跨週展表)
+            # 兩大類之二：方案類型佔比分析 (完美剔除空行 + 底部 Total)
             # ====================================================
             with sub_tab2:
                 st.subheader("🧩 各方案類型營運指標跨週趨勢分析")
-                st.caption("💡 可在下方切換不同指標，檢視各方案類型在選定時間區間內的每週變化明細：")
+                st.caption(f"💡 目前選取【{len(selected_dates)} 週】時間區間。下方各表已完整跟隨時間篩選連動：")
                 
                 metric_tabs = st.tabs(["1. Conversion (轉換)", "2. Churn (流失)", "3. Switch-in (轉入)", "4. Switch-out (轉出)", "5. Sub (當週會員)"])
                 
@@ -457,15 +502,10 @@ with main_tab1:
                         
                         if not df_metric.empty:
                             m_pivot = df_metric.pivot_table(index='方案類型', columns='Date', values='Value', aggfunc='sum', fill_value=0)
-                            m_pivot = m_pivot.round(0).astype(int)
                             
-                            if hasattr(m_pivot, 'map'):
-                                formatted_m = m_pivot.map(lambda x: f"{x:,}")
-                            else:
-                                formatted_m = m_pivot.applymap(lambda x: f"{x:,}")
-                                
-                            # 使用 HTML 渲染確保置中
-                            st.write(formatted_m.to_html(justify='center'), unsafe_allow_html=True)
+                            # 渲染乾淨、剔除空行、帶有 Total 的置中 HTML 表格
+                            table_html = render_custom_html_table(m_pivot, first_col_name="Date")
+                            st.markdown(table_html, unsafe_allow_html=True)
                         else:
                             st.info(f"選定區間內無 {metric_key} 相關數據。")
                             
