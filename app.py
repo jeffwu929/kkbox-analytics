@@ -1,11 +1,17 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-import plotly.express as px
 import re
 import json
 import os
 from datetime import datetime
+
+# 嘗試載入 Plotly，若環境未安裝則降級使用 Matplotlib
+try:
+    import plotly.express as px
+    HAS_PLOTLY = True
+except ImportError:
+    HAS_PLOTLY = False
 
 st.set_page_config(page_title="KKBOX 會員數據自動化分析系統", layout="wide", page_icon="📊")
 
@@ -256,7 +262,7 @@ with main_tab4:
         st.write("尚無讀取到方案數據，請先載入每週 Raw Data。")
 
 # ==========================================
-# 📈 分頁一：數據分析儀表板 (內部拆分為兩大子 Tab)
+# 📈 分頁一：數據分析儀表板
 # ==========================================
 with main_tab1:
     if st.sidebar.button("🔄 重新載入最新數據"):
@@ -331,14 +337,9 @@ with main_tab1:
             diff_target = latest_val - target_val if target_val > 0 else 0
             achievement_rate = (latest_val / target_val * 100) if target_val > 0 else 0.0
 
-            # 🚨 儀表板核心拆分為兩大塊 Tab
             sub_tab1, sub_tab2 = st.tabs(["📊 1. 會員數趨勢與目標比較", "🧩 2. 方案類型佔比分析"])
 
-            # ====================================================
-            # 兩大類之一：訂閱數變化 (比較指標、趨勢圖、透視表)
-            # ====================================================
             with sub_tab1:
-                # 1️⃣ TWM 會員數指標比較表
                 st.subheader(f"📌 TWM 會員數比較指標 ({latest_date_str})")
                 
                 if prev_val:
@@ -386,7 +387,6 @@ with main_tab1:
                 st.markdown(twm_html_table, unsafe_allow_html=True)
                 st.markdown("---")
 
-                # 2️⃣ Total Sub 跨週趨勢圖
                 st.subheader("📈 Total Sub 跨週走勢圖")
                 fig, ax = plt.subplots(figsize=(12, 4.2))
                 ax.plot(df_sub_weekly['Date'], df_sub_weekly['Value'], marker='o', color='#1DB954', linewidth=2.5)
@@ -400,7 +400,6 @@ with main_tab1:
                 st.pyplot(fig)
                 st.markdown("---")
 
-                # 3️⃣ 各方案類型會員數 (Sub) 跨週透視表
                 st.subheader("📋 各方案類型會員數 (Sub) 跨週透視表")
                 pivot_df = df_sub.pivot_table(index=['方案類型', 'Package_Name'], columns='Date', values='Value', aggfunc='sum', fill_value=0)
                 pivot_df = pivot_df.round(0).astype(int)
@@ -412,9 +411,6 @@ with main_tab1:
                     
                 st.dataframe(formatted_pivot, use_container_width=True)
 
-            # ====================================================
-            # 兩大類之二：方案類型佔比 (總覽表 + 100%中文支援 Plotly 圓餅圖)
-            # ====================================================
             with sub_tab2:
                 st.subheader(f"🧩 方案類型佔比分析 ({latest_date_str})")
                 st.caption("💡 針對最新週別，依據您的自訂方案類型彙總 Sub、Conversion、Churn、Switch-in、Switch-out 關鍵營運指標：")
@@ -456,20 +452,25 @@ with main_tab1:
                     if 'Sub' in tag_composition.columns and tag_composition['Sub'].sum() > 0:
                         sub_by_tag = tag_composition['Sub'].reset_index()
                         
-                        # 🚀 使用 Plotly 繪製互動式圓餅圖，100% 中文完美顯示且滑鼠懸停可看數值
-                        fig_plotly = px.pie(
-                            sub_by_tag, 
-                            names='方案類型', 
-                            values='Sub',
-                            color_discrete_sequence=['#1DB954', '#4B9CD3', '#FF9F1C', '#E50914', '#9B59B6'],
-                            hole=0.3
-                        )
-                        fig_plotly.update_traces(textposition='inside', textinfo='percent+label')
-                        fig_plotly.update_layout(
-                            margin=dict(t=10, b=10, l=10, r=10),
-                            showlegend=True
-                        )
-                        st.plotly_chart(fig_plotly, use_container_width=True)
+                        if HAS_PLOTLY:
+                            fig_plotly = px.pie(
+                                sub_by_tag, 
+                                names='方案類型', 
+                                values='Sub',
+                                color_discrete_sequence=['#1DB954', '#4B9CD3', '#FF9F1C', '#E50914', '#9B59B6'],
+                                hole=0.3
+                            )
+                            fig_plotly.update_traces(textposition='inside', textinfo='percent+label')
+                            fig_plotly.update_layout(
+                                margin=dict(t=10, b=10, l=10, r=10),
+                                showlegend=True
+                            )
+                            st.plotly_chart(fig_plotly, use_container_width=True)
+                        else:
+                            fig_m, ax_m = plt.subplots(figsize=(5, 4.2))
+                            ax_m.pie(sub_by_tag['Sub'], labels=sub_by_tag['方案類型'], autopct='%1.1f%%', startangle=140)
+                            ax_m.axis('equal')
+                            st.pyplot(fig_m)
                     else:
                         st.info("尚無 Sub 數據可繪製佔比圖。")
 
