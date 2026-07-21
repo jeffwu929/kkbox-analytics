@@ -322,8 +322,12 @@ with main_tab1:
             pivot_df = df_sub.pivot_table(index=['Tag', 'Package_Name'], columns='Date', values='Value', aggfunc='sum', fill_value=0)
             pivot_df = pivot_df.round(0).astype(int)
             
-            # 百位數加上千分位逗號格式化符號
-            formatted_pivot = pivot_df.applymap(lambda x: f"{x:,}")
+            # 🚨 相容最新 Pandas 版本的格式化寫法
+            if hasattr(pivot_df, 'map'):
+                formatted_pivot = pivot_df.map(lambda x: f"{x:,}")
+            else:
+                formatted_pivot = pivot_df.applymap(lambda x: f"{x:,}")
+                
             st.dataframe(formatted_pivot, use_container_width=True)
             
     else:
