@@ -1,15 +1,11 @@
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
-import matplotlib
+import plotly.express as px
 import re
 import json
 import os
 from datetime import datetime
-
-# 解決 Matplotlib 中文字體亂碼/跑掉的問題
-plt.rcParams['font.sans-serif'] = ['Microsoft JhengHei', 'SimHei', 'Arial Unicode MS', 'DejaVu Sans']
-plt.rcParams['axes.unicode_minus'] = False
 
 st.set_page_config(page_title="KKBOX 會員數據自動化分析系統", layout="wide", page_icon="📊")
 
@@ -77,7 +73,7 @@ if 'tag_map' not in st.session_state:
     st.session_state['tag_map'] = load_json_file(TAGS_FILE, OFFICIAL_TAG_MAP)
 
 st.title("📊 KKBOX 會員數據自動化分析系統")
-st.caption("🚀 全方位自動化儀表板：整合 TWM 會員數比較表、方案類型佔比分析、歷史趨勢圖與透視表！")
+st.caption("🚀 模組化極簡儀表板：訂閱數趨勢與方案類型佔比雙頁面獨立展示！")
 st.markdown("---")
 
 main_tab1, main_tab2, main_tab3, main_tab4 = st.tabs([
@@ -260,7 +256,7 @@ with main_tab4:
         st.write("尚無讀取到方案數據，請先載入每週 Raw Data。")
 
 # ==========================================
-# 📈 分頁一：一頁式數據分析儀表板
+# 📈 分頁一：數據分析儀表板 (內部拆分為兩大子 Tab)
 # ==========================================
 with main_tab1:
     if st.sidebar.button("🔄 重新載入最新數據"):
@@ -335,154 +331,147 @@ with main_tab1:
             diff_target = latest_val - target_val if target_val > 0 else 0
             achievement_rate = (latest_val / target_val * 100) if target_val > 0 else 0.0
 
-            # ----------------------------------------------------
-            # 1️⃣ TWM 會員數指標比較表
-            # ----------------------------------------------------
-            st.subheader(f"📌 TWM 會員數比較指標 ({latest_date_str})")
-            
-            if prev_val:
-                wow_color = "#1DB954" if wow_val >= 0 else "#E50914"
-                wow_html = f"<span style='color:{wow_color}; font-weight:bold;'>{'+' if wow_val > 0 else ''}{int(round(wow_val)):,} ({wow_pct:+.2f}%)</span>"
-            else:
-                wow_html = "N/A"
-                
-            if target_val > 0:
-                diff_color = "#1DB954" if diff_target >= 0 else "#E50914"
-                diff_html = f"<span style='color:{diff_color}; font-weight:bold;'>{'+' if diff_target > 0 else ''}{int(round(diff_target)):,}</span>"
-                
-                achieve_color = "#1DB954" if achievement_rate >= 100.0 else "#E50914"
-                achieve_html = f"<span style='color:{achieve_color}; font-weight:bold;'>{achievement_rate:.2f}%</span>"
-            else:
-                diff_html = "N/A"
-                achieve_html = "N/A"
+            # 🚨 儀表板核心拆分為兩大塊 Tab
+            sub_tab1, sub_tab2 = st.tabs(["📊 1. 會員數趨勢與目標比較", "🧩 2. 方案類型佔比分析"])
 
-            twm_html_table = f"""
-            <table style="width:100%; border-collapse:collapse; text-align:center; font-size:16px;">
-                <thead>
-                    <tr style="background-color:#f2f2f2; border-bottom:2px solid #ddd;">
-                        <th style="padding:10px;">指標項目</th>
-                        <th style="padding:10px;">本週</th>
-                        <th style="padding:10px;">上週</th>
-                        <th style="padding:10px;">WOW 增減</th>
-                        <th style="padding:10px;">{latest_dt.month}月目標</th>
-                        <th style="padding:10px;">與目標落差</th>
-                        <th style="padding:10px;">達成率</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr style="border-bottom:1px solid #ddd;">
-                        <td style="padding:12px; font-weight:bold;">TWM 會員數 (Sub)</td>
-                        <td style="padding:12px; font-weight:bold;">{int(round(latest_val)):,}</td>
-                        <td style="padding:12px;">{f"{int(round(prev_val)):,}" if prev_val else "N/A"}</td>
-                        <td style="padding:12px;">{wow_html}</td>
-                        <td style="padding:12px;">{f"{target_val:,}" if target_val > 0 else "未設定"}</td>
-                        <td style="padding:12px;">{diff_html}</td>
-                        <td style="padding:12px;">{achieve_html}</td>
-                    </tr>
-                </tbody>
-            </table>
-            """
-            
-            st.markdown(twm_html_table, unsafe_allow_html=True)
-            st.markdown("---")
-
-            # ----------------------------------------------------
-            # 🧩 2️⃣ 方案類型佔比 (Sub, Conversion, Churn, Switch-in, Switch-out)
-            # ----------------------------------------------------
-            st.subheader(f"🧩 方案類型佔比 ({latest_date_str})")
-            st.caption("💡 針對最新週別，依據您的自訂方案類型彙總各項關鍵營運指標：")
-            
-            df_latest_all = df_filtered[df_filtered['Date'] == latest_date_str]
-            
-            tag_composition = df_latest_all.pivot_table(
-                index='方案類型', 
-                columns='Metric', 
-                values='Value', 
-                aggfunc='sum', 
-                fill_value=0
-            )
-            
-            required_metrics = ['Sub', 'Conversion', 'Churn', 'Switch in', 'Switch out']
-            for m in required_metrics:
-                if m not in tag_composition.columns:
-                    tag_composition[m] = 0
-                    
-            tag_composition = tag_composition[required_metrics].rename(columns={
-                'Switch in': 'Switch-in',
-                'Switch out': 'Switch-out'
-            })
-            
-            tag_composition = tag_composition.round(0).astype(int)
-            
-            col_comp1, col_comp2 = st.columns([3, 2])
-            
-            with col_comp1:
-                st.write("**📋 方案類型指標總覽表：**")
-                if hasattr(tag_composition, 'map'):
-                    formatted_comp = tag_composition.map(lambda x: f"{x:,}")
+            # ====================================================
+            # 兩大類之一：訂閱數變化 (比較指標、趨勢圖、透視表)
+            # ====================================================
+            with sub_tab1:
+                # 1️⃣ TWM 會員數指標比較表
+                st.subheader(f"📌 TWM 會員數比較指標 ({latest_date_str})")
+                
+                if prev_val:
+                    wow_color = "#1DB954" if wow_val >= 0 else "#E50914"
+                    wow_html = f"<span style='color:{wow_color}; font-weight:bold;'>{'+' if wow_val > 0 else ''}{int(round(wow_val)):,} ({wow_pct:+.2f}%)</span>"
                 else:
-                    formatted_comp = tag_composition.applymap(lambda x: f"{x:,}")
-                st.dataframe(formatted_comp, use_container_width=True)
+                    wow_html = "N/A"
+                    
+                if target_val > 0:
+                    diff_color = "#1DB954" if diff_target >= 0 else "#E50914"
+                    diff_html = f"<span style='color:{diff_color}; font-weight:bold;'>{'+' if diff_target > 0 else ''}{int(round(diff_target)):,}</span>"
+                    
+                    achieve_color = "#1DB954" if achievement_rate >= 100.0 else "#E50914"
+                    achieve_html = f"<span style='color:{achieve_color}; font-weight:bold;'>{achievement_rate:.2f}%</span>"
+                else:
+                    diff_html = "N/A"
+                    achieve_html = "N/A"
+
+                twm_html_table = f"""
+                <table style="width:100%; border-collapse:collapse; text-align:center; font-size:16px;">
+                    <thead>
+                        <tr style="background-color:#f2f2f2; border-bottom:2px solid #ddd;">
+                            <th style="padding:10px;">指標項目</th>
+                            <th style="padding:10px;">本週</th>
+                            <th style="padding:10px;">上週</th>
+                            <th style="padding:10px;">WOW 增減</th>
+                            <th style="padding:10px;">{latest_dt.month}月目標</th>
+                            <th style="padding:10px;">與目標落差</th>
+                            <th style="padding:10px;">達成率</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr style="border-bottom:1px solid #ddd;">
+                            <td style="padding:12px; font-weight:bold;">TWM 會員數 (Sub)</td>
+                            <td style="padding:12px; font-weight:bold;">{int(round(latest_val)):,}</td>
+                            <td style="padding:12px;">{f"{int(round(prev_val)):,}" if prev_val else "N/A"}</td>
+                            <td style="padding:12px;">{wow_html}</td>
+                            <td style="padding:12px;">{f"{target_val:,}" if target_val > 0 else "未設定"}</td>
+                            <td style="padding:12px;">{diff_html}</td>
+                            <td style="padding:12px;">{achieve_html}</td>
+                        </tr>
+                    </tbody>
+                </table>
+                """
+                st.markdown(twm_html_table, unsafe_allow_html=True)
+                st.markdown("---")
+
+                # 2️⃣ Total Sub 跨週趨勢圖
+                st.subheader("📈 Total Sub 跨週走勢圖")
+                fig, ax = plt.subplots(figsize=(12, 4.2))
+                ax.plot(df_sub_weekly['Date'], df_sub_weekly['Value'], marker='o', color='#1DB954', linewidth=2.5)
                 
-            with col_comp2:
-                st.write("**🍰 Sub 會員數方案類型佔比：**")
-                if 'Sub' in tag_composition.columns and tag_composition['Sub'].sum() > 0:
-                    sub_by_tag = tag_composition['Sub']
-                    fig_pie, ax_pie = plt.subplots(figsize=(5, 4.2))
+                for i, row in df_sub_weekly.iterrows():
+                    ax.annotate(f"{int(round(row['Value'])):,}", (row['Date'], row['Value']), textcoords="offset points", xytext=(0,10), ha='center', fontweight='bold')
                     
-                    # 繪製圓餅圖，顯式指定中文字體
-                    wedges, texts, autotexts = ax_pie.pie(
-                        sub_by_tag, 
-                        labels=sub_by_tag.index, 
-                        autopct='%1.1f%%', 
-                        startangle=140, 
-                        colors=['#1DB954', '#4B9CD3', '#FF9F1C', '#E50914', '#9B59B6']
-                    )
+                ax.set_ylabel("Subscribers")
+                plt.xticks(rotation=30)
+                ax.grid(True, linestyle='--', alpha=0.5)
+                st.pyplot(fig)
+                st.markdown("---")
+
+                # 3️⃣ 各方案類型會員數 (Sub) 跨週透視表
+                st.subheader("📋 各方案類型會員數 (Sub) 跨週透視表")
+                pivot_df = df_sub.pivot_table(index=['方案類型', 'Package_Name'], columns='Date', values='Value', aggfunc='sum', fill_value=0)
+                pivot_df = pivot_df.round(0).astype(int)
+                
+                if hasattr(pivot_df, 'map'):
+                    formatted_pivot = pivot_df.map(lambda x: f"{x:,}")
+                else:
+                    formatted_pivot = pivot_df.applymap(lambda x: f"{x:,}")
                     
-                    # 設定圓餅圖字體樣式
-                    for t in texts:
-                        t.set_fontproperties('Microsoft JhengHei')
-                        t.set_fontsize(11)
-                    for at in autotexts:
-                        at.set_fontsize(10)
-                        at.set_weight('bold')
+                st.dataframe(formatted_pivot, use_container_width=True)
+
+            # ====================================================
+            # 兩大類之二：方案類型佔比 (總覽表 + 100%中文支援 Plotly 圓餅圖)
+            # ====================================================
+            with sub_tab2:
+                st.subheader(f"🧩 方案類型佔比分析 ({latest_date_str})")
+                st.caption("💡 針對最新週別，依據您的自訂方案類型彙總 Sub、Conversion、Churn、Switch-in、Switch-out 關鍵營運指標：")
+                
+                df_latest_all = df_filtered[df_filtered['Date'] == latest_date_str]
+                
+                tag_composition = df_latest_all.pivot_table(
+                    index='方案類型', 
+                    columns='Metric', 
+                    values='Value', 
+                    aggfunc='sum', 
+                    fill_value=0
+                )
+                
+                required_metrics = ['Sub', 'Conversion', 'Churn', 'Switch in', 'Switch out']
+                for m in required_metrics:
+                    if m not in tag_composition.columns:
+                        tag_composition[m] = 0
                         
-                    ax_pie.axis('equal')
-                    st.pyplot(fig_pie)
-                else:
-                    st.info("尚無 Sub 數據可繪製佔比圖。")
+                tag_composition = tag_composition[required_metrics].rename(columns={
+                    'Switch in': 'Switch-in',
+                    'Switch out': 'Switch-out'
+                })
+                
+                tag_composition = tag_composition.round(0).astype(int)
+                
+                col_comp1, col_comp2 = st.columns([3, 2])
+                
+                with col_comp1:
+                    st.write("**📋 方案類型指標總覽表：**")
+                    if hasattr(tag_composition, 'map'):
+                        formatted_comp = tag_composition.map(lambda x: f"{x:,}")
+                    else:
+                        formatted_comp = tag_composition.applymap(lambda x: f"{x:,}")
+                    st.dataframe(formatted_comp, use_container_width=True)
                     
-            st.markdown("---")
+                with col_comp2:
+                    st.write("**🍰 Sub 會員數方案類型佔比：**")
+                    if 'Sub' in tag_composition.columns and tag_composition['Sub'].sum() > 0:
+                        sub_by_tag = tag_composition['Sub'].reset_index()
+                        
+                        # 🚀 使用 Plotly 繪製互動式圓餅圖，100% 中文完美顯示且滑鼠懸停可看數值
+                        fig_plotly = px.pie(
+                            sub_by_tag, 
+                            names='方案類型', 
+                            values='Sub',
+                            color_discrete_sequence=['#1DB954', '#4B9CD3', '#FF9F1C', '#E50914', '#9B59B6'],
+                            hole=0.3
+                        )
+                        fig_plotly.update_traces(textposition='inside', textinfo='percent+label')
+                        fig_plotly.update_layout(
+                            margin=dict(t=10, b=10, l=10, r=10),
+                            showlegend=True
+                        )
+                        st.plotly_chart(fig_plotly, use_container_width=True)
+                    else:
+                        st.info("尚無 Sub 數據可繪製佔比圖。")
 
-            # ----------------------------------------------------
-            # 3️⃣ Total Sub 跨週趨勢圖
-            # ----------------------------------------------------
-            st.subheader("📈 Total Sub 跨週走勢圖")
-            fig, ax = plt.subplots(figsize=(12, 4.2))
-            ax.plot(df_sub_weekly['Date'], df_sub_weekly['Value'], marker='o', color='#1DB954', linewidth=2.5)
-            
-            for i, row in df_sub_weekly.iterrows():
-                ax.annotate(f"{int(round(row['Value'])):,}", (row['Date'], row['Value']), textcoords="offset points", xytext=(0,10), ha='center', fontweight='bold')
-                
-            ax.set_ylabel("Subscribers")
-            plt.xticks(rotation=30)
-            ax.grid(True, linestyle='--', alpha=0.5)
-            st.pyplot(fig)
-            st.markdown("---")
-
-            # ----------------------------------------------------
-            # 4️⃣ 各方案類型會員數 (Sub) 跨週透視表
-            # ----------------------------------------------------
-            st.subheader("📋 各方案類型會員數 (Sub) 跨週透視表")
-            pivot_df = df_sub.pivot_table(index=['方案類型', 'Package_Name'], columns='Date', values='Value', aggfunc='sum', fill_value=0)
-            pivot_df = pivot_df.round(0).astype(int)
-            
-            if hasattr(pivot_df, 'map'):
-                formatted_pivot = pivot_df.map(lambda x: f"{x:,}")
-            else:
-                formatted_pivot = pivot_df.applymap(lambda x: f"{x:,}")
-                
-            st.dataframe(formatted_pivot, use_container_width=True)
-            
     else:
         st.info("💡 請點選上方『⚙️ Raw Data 網址庫管理』分頁新增每週分頁網址。")
