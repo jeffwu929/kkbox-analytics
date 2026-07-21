@@ -2,5 +2,4 @@ streamlit
 pandas
 openpyxl
 matplotlib
-gdown==5.2.0
-google-api-python-client
+requests
